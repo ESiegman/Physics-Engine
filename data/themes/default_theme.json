@@ -1,0 +1,34 @@
+{
+    "defaults": {
+        "font": {
+            "name": "fira_code",
+            "size": "14",
+            "bold": "0",
+            "italic": "0"
+        }
+    },
+    "label": {
+        "colours": {
+            "normal_text": "#FFFFFF"
+        }
+    },
+    "horizontal_slider": {
+        "colours": {
+            "dark_bg": "#202020",
+            "normal_text": "#FFFFFF",
+            "filled_bar": "#3050C0",
+            "unfilled_bar": "#606060",
+            "slider_button": "#808080"
+        }
+    },
+    "button": {
+        "colours": {
+            "normal_bg": "#303030",
+            "hovered_bg": "#404040",
+            "pressed_bg": "#202020",
+            "normal_text": "#FFFFFF",
+            "hovered_text": "#FFFFFF",
+            "pressed_text": "#FFFFFF"
+        }
+    }
+}

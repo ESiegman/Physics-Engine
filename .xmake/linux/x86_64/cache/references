@@ -1,0 +1,27 @@
+{
+    packages = {
+        "/home/eren/.xmake/packages/p/pkg-config/0.29.2/a0aba256d7674c1bbee15f0ee1534e92",
+        "/home/eren/.xmake/packages/u/util-macros/1.20.0/21ebacb0450b4b16b06b586ecc142d3f",
+        "/home/eren/.xmake/packages/x/xorgproto/2023.2/3a1682704c034fbf87583b32455dde94",
+        "/home/eren/.xmake/packages/x/xtrans/1.6.0/588d85a9c99148b8ae87dee11b39ab40",
+        "/home/eren/.xmake/packages/l/libffi/3.4.7/a07f53348a7a41cab6934881eba30124",
+        "/home/eren/.xmake/packages/z/zlib/v1.3.1/994fafa590ed48ac9f71516cc846d155",
+        "/home/eren/.xmake/packages/o/openssl/1.1.1-w/6c51ab6278e2479b883dffafac69fdaf",
+        "/home/eren/.xmake/packages/c/ca-certificates/20250131/e9ba281ae183402a80dc072d4d571c20",
+        "/home/eren/.xmake/packages/p/python/3.13.2/7dbc4c2192884093912e9407517d19cf",
+        "/home/eren/.xmake/packages/x/xcb-proto/1.17.0/eafb62cb3f37412ebe648eb0ab4b4b35",
+        "/home/eren/.xmake/packages/l/libpthread-stubs/0.5/e6c09af522624eb1ae863fe21c4aa62c",
+        "/home/eren/.xmake/packages/l/libxau/1.0.12/f406943012fc443596a2e2e23215839d",
+        "/home/eren/.xmake/packages/l/libxdmcp/1.1.5/1e5cac3a0ef94e939a1a5bb7efb8c24f",
+        "/home/eren/.xmake/packages/l/libxcb/1.17.0/27d2233a10b34ff5971001208db29e2c",
+        "/home/eren/.xmake/packages/l/libx11/1.8.12/5b3492e889e848b2b511e3f3031c5538",
+        "/home/eren/.xmake/packages/l/libxext/1.3.6/5a0d83a7724446099fee649c3d9afd32",
+        "/home/eren/.xmake/packages/l/libxrender/0.9.12/75df963310db406385383085b95b222e",
+        "/home/eren/.xmake/packages/l/libxrandr/1.5.4/a36fcab100ed449e86944351e00c0384",
+        "/home/eren/.xmake/packages/l/libxinerama/1.1.5/e539e5b3575342a89c7a931295fe40c5",
+        "/home/eren/.xmake/packages/l/libxfixes/6.0.1/31f0eaa885a84ef6b740f6ed04fea3e3",
+        "/home/eren/.xmake/packages/l/libxcursor/1.2.3/665b359dc13241789f6ca7a586bc5127",
+        "/home/eren/.xmake/packages/l/libxi/1.8.2/2f225dfd5e274482ae09ba4da0c185c5",
+        "/home/eren/.xmake/packages/g/glfw/3.4/4c3c72af70fd4599a3038fc662af9c28"
+    }
+}

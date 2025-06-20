@@ -1,0 +1,15 @@
+# Build artifacts
+bin/
+build/
+compile_commands.json
+
+# Generated files
+glad-generated/
+imgui.ini
+
+# External dependencies managed by Nix (symlinks to store paths)
+external/
+
+# Nix flake lock file (often regenerated)
+flake.lock
+
