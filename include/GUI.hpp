@@ -18,6 +18,7 @@ public:
 
 private:
   bool m_firstTime = true;
+  bool m_showCameraControlsWindow = false;
 };
 
 #endif

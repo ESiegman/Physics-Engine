@@ -63,8 +63,12 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
     ImGuiID dock_main_id = dockspace_id;
     ImGuiID dock_left_id = ImGui::DockBuilderSplitNode(
         dock_main_id, ImGuiDir_Left, 0.25f, nullptr, &dock_main_id);
+    ImGuiID dock_left_top_id = ImGui::DockBuilderSplitNode(
+        dock_left_id, ImGuiDir_Up, 0.75f, nullptr, &dock_left_id);
+    ImGuiID dock_left_bottom_id = dock_left_id;
 
-    ImGui::DockBuilderDockWindow("Settings", dock_left_id);
+    ImGui::DockBuilderDockWindow("Settings", dock_left_top_id);
+    ImGui::DockBuilderDockWindow("Camera Controls", dock_left_bottom_id);
     ImGui::DockBuilderDockWindow("Scene", dock_main_id);
     ImGui::DockBuilderFinish(dockspace_id);
   }
@@ -74,6 +78,10 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
   ImGui::Begin("Settings");
   if (ImGui::Button("Restart Simulation")) {
     sim.restart();
+  }
+  ImGui::Separator();
+  if (ImGui::Button("Open Camera Controls")) {
+    m_showCameraControlsWindow = !m_showCameraControlsWindow;
   }
   ImGui::Separator();
 
@@ -127,6 +135,22 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
   ImGui::SliderFloat("FOV", &sim.m_constants.CAMERA_FOV, 30.0f, 90.0f);
 
   ImGui::End();
+
+  if (m_showCameraControlsWindow) {
+    ImGui::Begin("Camera Controls", &m_showCameraControlsWindow);
+    ImGui::Text("Movement Controls:");
+    ImGui::BulletText("W: Move Forward");
+    ImGui::BulletText("S: Move Backward");
+    ImGui::BulletText("A: Move Left");
+    ImGui::BulletText("D: Move Right");
+    ImGui::BulletText("Space: Move Up");
+    ImGui::BulletText("Left Shift: Move Down");
+    ImGui::BulletText("Mouse Movement: Look Around (when not locked)");
+    ImGui::BulletText("Left Control: Toggle Camera Lock");
+    ImGui::BulletText("ESC: Close Window");
+
+    ImGui::End();
+  }
 
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
   ImGui::Begin("Scene");
