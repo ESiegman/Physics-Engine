@@ -2,27 +2,37 @@
 
 #include <cstddef>
 
-namespace Constants {
-constexpr bool USE_3D = true;
+struct SimulationConstants {
+  bool USE_3D;
+  float WORLD_WIDTH;
+  float WORLD_HEIGHT;
+  float WORLD_DEPTH;
 
-constexpr float WORLD_WIDTH = 1920.0f;
-constexpr float WORLD_HEIGHT = 1080.0f;
-constexpr float WORLD_DEPTH = 1080.0f;
+  int NUM_OBJECTS;
+  float CELL_SIZE_3D;
+  float CELL_SIZE_2D;
+  float FIXED_DELTA_TIME;
+  int PHYSICS_ITERATIONS;
 
-constexpr size_t NUM_OBJECTS = 2000;
-constexpr float CELL_SIZE_3D = 50.0f;
-constexpr float CELL_SIZE_2D = 20.0f;
-constexpr float FIXED_DELTA_TIME = 0.01f;
-constexpr int PHYSICS_ITERATIONS = 10;
+  float GRAVITY;
+  float OBJECT_DEFAULT_RADIUS;
+  float OBJECT_DEFAULT_MASS;
+  float OBJECT_MIN_VEL;
+  float OBJECT_MAX_VEL;
+  float COEFFICIENT_OF_RESTITUTION;
+  float VERTICAL_DAMPING;
 
-constexpr float GRAVITY = -980.0f;
-constexpr float OBJECT_DEFAULT_RADIUS = 10.0f;
-constexpr float OBJECT_DEFAULT_MASS = 25.0f;
-constexpr float OBJECT_MIN_VEL = -500.0f;
-constexpr float OBJECT_MAX_VEL = 500.0f;
-constexpr float COEFFICIENT_OF_RESTITUTION = 0.95f;
+  float CAMERA_MOVEMENT_SPEED;
+  float CAMERA_MOUSE_SENSITIVITY;
+  float CAMERA_FOV;
 
-constexpr float CAMERA_MOVEMENT_SPEED = 1500.0f;
-constexpr float CAMERA_MOUSE_SENSITIVITY = 0.1f;
-constexpr float CAMERA_FOV = 45.0f;
-} // namespace Constants
+  SimulationConstants()
+      : USE_3D(true), WORLD_WIDTH(1920.0f), WORLD_HEIGHT(1080.0f),
+        WORLD_DEPTH(1080.0f), NUM_OBJECTS(2000), CELL_SIZE_3D(50.0f),
+        CELL_SIZE_2D(20.0f), FIXED_DELTA_TIME(0.01f), PHYSICS_ITERATIONS(10),
+        GRAVITY(-980.0f), OBJECT_DEFAULT_RADIUS(10.0f),
+        OBJECT_DEFAULT_MASS(25.0f), OBJECT_MIN_VEL(-500.0f),
+        OBJECT_MAX_VEL(500.0f), COEFFICIENT_OF_RESTITUTION(0.95f),
+        VERTICAL_DAMPING(0.8f), CAMERA_MOVEMENT_SPEED(1500.0f),
+        CAMERA_MOUSE_SENSITIVITY(0.1f), CAMERA_FOV(45.0f) {}
+};

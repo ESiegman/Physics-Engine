@@ -1,16 +1,16 @@
 #pragma once
 
-#include <glm/glm.hpp>
-#include <mutex>
+#include "Constants.hpp"
 
 #include <glm/glm.hpp>
 #include <mutex>
 
 class PhysicsObject {
 public:
-  PhysicsObject(bool is3D, float radius, float mass);
+  PhysicsObject(const SimulationConstants &constants, bool is3D, float radius,
+                float mass);
 
-  void update(float dt, bool is3D, float gravity);
+  void update(float dt);
   void preventBorderCollision(bool is3D);
 
   const glm::vec3 &position() const { return m_pos; }
@@ -30,7 +30,8 @@ private:
   glm::vec3 m_color;
   float m_rad;
   float m_mass;
+  const SimulationConstants &m_constants;
 };
 
-void collision(PhysicsObject &o1, PhysicsObject &o2, bool is3D,
-               float restitution);
+void collision(PhysicsObject &o1, PhysicsObject &o2,
+               const SimulationConstants &constants);

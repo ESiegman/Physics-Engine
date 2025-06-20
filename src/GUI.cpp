@@ -77,20 +77,54 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
   }
   ImGui::Separator();
 
-  ImGui::Text("Simulation Parameters");
-  int num_objects = sim.NUM_OBJECTS;
-  if (ImGui::InputInt("Number of Objects", &num_objects, 100, 1000)) {
-    if (num_objects < 1)
-      num_objects = 1;
-    sim.NUM_OBJECTS = num_objects;
+  ImGui::Text("Simulation Parameters (Restart Require for Change in Num)");
+  int num_objects_val = sim.m_constants.NUM_OBJECTS;
+  if (ImGui::InputInt("Number of Objects", &num_objects_val, 100, 1000)) {
+    if (num_objects_val < 1)
+      num_objects_val = 1;
+    sim.m_constants.NUM_OBJECTS = num_objects_val;
+    sim.restart();
   }
-
-  ImGui::SliderFloat("Gravity", &sim.GRAVITY, -2000.0f, 0.0f);
-  ImGui::SliderFloat("Bounciness", &sim.COEFFICIENT_OF_RESTITUTION, 0.0f, 1.0f);
+  ImGui::SliderFloat("Gravity", &sim.m_constants.GRAVITY, -2000.0f, 0.0f);
+  ImGui::SliderFloat("Bounciness", &sim.m_constants.COEFFICIENT_OF_RESTITUTION,
+                     0.0f, 1.0f);
+  ImGui::SliderFloat("Vertical Damping", &sim.m_constants.VERTICAL_DAMPING,
+                     0.0f, 1.0f);
+  ImGui::Checkbox("Use 3D", &sim.m_constants.USE_3D);
 
   ImGui::Separator();
-  ImGui::Text("Default Object Properties");
-  ImGui::SliderFloat("Radius", &sim.OBJECT_DEFAULT_RADIUS, 1.0f, 50.0f);
+  ImGui::Text("World Dimensions (Restart Required for Full Effect)");
+  ImGui::InputFloat("World Width", &sim.m_constants.WORLD_WIDTH);
+  ImGui::InputFloat("World Height", &sim.m_constants.WORLD_HEIGHT);
+  ImGui::InputFloat("World Depth", &sim.m_constants.WORLD_DEPTH);
+
+  ImGui::Separator();
+  ImGui::Text("Physics Engine Settings");
+  ImGui::InputFloat("Fixed Delta Time", &sim.m_constants.FIXED_DELTA_TIME);
+  ImGui::InputInt("Physics Iterations", &sim.m_constants.PHYSICS_ITERATIONS);
+
+  ImGui::Separator();
+  ImGui::Text("Default Object Properties (Restart Required)");
+  ImGui::SliderFloat("Radius", &sim.m_constants.OBJECT_DEFAULT_RADIUS, 1.0f,
+                     50.0f);
+  ImGui::InputFloat("Mass", &sim.m_constants.OBJECT_DEFAULT_MASS);
+  ImGui::SliderFloat("Min Start Velocity", &sim.m_constants.OBJECT_MIN_VEL,
+                     -2000.0f, 0.0f);
+  ImGui::SliderFloat("Max Start Velocity", &sim.m_constants.OBJECT_MAX_VEL,
+                     0.0f, 2000.0f);
+
+  ImGui::Separator();
+  ImGui::Text("Spatial Grid Settings (Restart Required)");
+  ImGui::InputFloat("Cell Size 2D", &sim.m_constants.CELL_SIZE_2D);
+  ImGui::InputFloat("Cell Size 3D", &sim.m_constants.CELL_SIZE_3D);
+
+  ImGui::Separator();
+  ImGui::Text("Camera Settings");
+  ImGui::SliderFloat("Movement Speed", &sim.m_constants.CAMERA_MOVEMENT_SPEED,
+                     100.0f, 5000.0f);
+  ImGui::SliderFloat("Mouse Sensitivity",
+                     &sim.m_constants.CAMERA_MOUSE_SENSITIVITY, 0.01f, 1.0f);
+  ImGui::SliderFloat("FOV", &sim.m_constants.CAMERA_FOV, 30.0f, 90.0f);
 
   ImGui::End();
 

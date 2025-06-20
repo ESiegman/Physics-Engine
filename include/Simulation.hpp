@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Camera.hpp"
+#include "Constants.hpp"
 #include "GUI.hpp"
 #include "PhysicsObject.hpp"
 #include "Renderer.hpp"
@@ -15,11 +16,7 @@ class GUI;
 
 class Simulation {
 public:
-  bool USE_3D = true;
-  size_t NUM_OBJECTS = 2000;
-  float GRAVITY = -980.0f;
-  float OBJECT_DEFAULT_RADIUS = 10.0f;
-  float COEFFICIENT_OF_RESTITUTION = 0.95f;
+  SimulationConstants m_constants;
 
   Simulation();
   ~Simulation();
@@ -39,6 +36,6 @@ private:
 
   static void checkCollisionsForChunk(
       const std::vector<std::unique_ptr<PhysicsObject>> &objects,
-      SpatialGrid &grid, size_t start_idx, size_t end_idx, bool is_3d,
-      float restitution);
+      SpatialGrid &grid, size_t start_idx, size_t end_idx,
+      const SimulationConstants &constants);
 };

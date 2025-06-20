@@ -1,11 +1,13 @@
 #pragma once
 
+#include "Constants.hpp"
 #include "Shader.hpp"
+
 #include <glm/glm.hpp>
 
 class Renderer {
 public:
-  Renderer();
+  Renderer(const SimulationConstants &constants);
   ~Renderer();
 
   void renderObject(glm::vec3 center, float radius, glm::vec3 color,
@@ -27,4 +29,6 @@ private:
 
   GLuint m_sphereVAO, m_sphereVBO, m_sphereEBO;
   unsigned int m_sphereIndexCount;
+
+  const SimulationConstants &m_constants;
 };

@@ -52,7 +52,8 @@ void generateUVSphere(std::vector<glm::vec3> &vertices,
   }
 }
 
-Renderer::Renderer() {
+Renderer::Renderer(const SimulationConstants& constants)
+  : m_constants(constants) {
   m_objectShader = new Shader("shaders/object.vert", "shaders/object.frag");
   m_lineShader = new Shader("shaders/line.vert", "shaders/line.frag");
   m_floorShader = new Shader("shaders/floor.vert", "shaders/floor.frag");
@@ -87,9 +88,9 @@ Renderer::Renderer() {
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void *)0);
   glEnableVertexAttribArray(0);
 
-  float w = Constants::WORLD_WIDTH;
-  float h = Constants::WORLD_HEIGHT;
-  float d = Constants::WORLD_DEPTH;
+  float w = m_constants.WORLD_WIDTH;
+  float h = m_constants.WORLD_HEIGHT;
+  float d = m_constants.WORLD_DEPTH;
 
   std::vector<glm::vec3> boxVertices = {
       glm::vec3(0, 0, 0), glm::vec3(w, 0, 0), glm::vec3(0, 0, 0),

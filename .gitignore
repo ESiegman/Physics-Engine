@@ -1,15 +1,21 @@
-# Build artifacts
+# IDE/Tooling caches
+.cache/
+.venv/
+
+# Build system artifacts
+.xmake/
 bin/
 build/
 compile_commands.json
 
-# Generated files
+# Generated code/libs
 glad-generated/
+
+# Configuration files
 imgui.ini
 
-# External dependencies managed by Nix (symlinks to store paths)
+# Dependencies (if managed by Nix and symlinked/generated)
 external/
 
-# Nix flake lock file (often regenerated)
+# Nix flake lock file
 flake.lock
-

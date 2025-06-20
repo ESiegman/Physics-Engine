@@ -1,66 +1,65 @@
 #include "../include/PhysicsObject.hpp"
-#include "../include/Constants.hpp"
 #include <glm/gtc/random.hpp>
 #include <random>
 
-PhysicsObject::PhysicsObject(bool is3D, float radius, float mass) {
+PhysicsObject::PhysicsObject(const SimulationConstants &constants, bool is3D,
+                             float radius, float mass)
+    : m_constants(constants) {
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> x_rand(0, Constants::WORLD_WIDTH);
-  std::uniform_real_distribution<float> y_rand(0, Constants::WORLD_HEIGHT);
-  std::uniform_real_distribution<float> z_rand(0, Constants::WORLD_DEPTH);
-  std::uniform_real_distribution<float> vel_rand(Constants::OBJECT_MIN_VEL, Constants::OBJECT_MAX_VEL);
+  std::uniform_real_distribution<float> x_rand(0, m_constants.WORLD_WIDTH);
+  std::uniform_real_distribution<float> y_rand(0, m_constants.WORLD_HEIGHT);
+  std::uniform_real_distribution<float> z_rand(0, m_constants.WORLD_DEPTH);
+  std::uniform_real_distribution<float> vel_rand(m_constants.OBJECT_MIN_VEL,
+                                                 m_constants.OBJECT_MAX_VEL);
 
-  m_pos =
-      glm::vec3(x_rand(gen), y_rand(gen), is3D ? z_rand(gen) : 0.0f);
+  m_pos = glm::vec3(x_rand(gen), y_rand(gen), is3D ? z_rand(gen) : 0.0f);
   m_rad = radius;
   m_mass = mass;
-  m_vel = glm::vec3(vel_rand(gen), vel_rand(gen),
-                    is3D ? vel_rand(gen) : 0.0f);
-  
-  std::uniform_real_distribution<float> color_rand(0.0f, 1.0f);
-  m_color = glm::vec3(color_rand(gen), color_rand(gen), color_rand(gen));
+  m_vel = glm::vec3(vel_rand(gen), vel_rand(gen), is3D ? vel_rand(gen) : 0.0f);
+
+  m_color = glm::vec3(1.0f, 1.0f, 1.0f);
 }
 
-void PhysicsObject::update(float dt, bool is3D, float gravity) {
-  m_vel.y += gravity * dt;
+void PhysicsObject::update(float dt) {
+  m_vel.y += m_constants.GRAVITY * dt;
   m_pos += m_vel * dt;
-  preventBorderCollision(is3D);
+  preventBorderCollision(m_constants.USE_3D);
 }
 
 void PhysicsObject::preventBorderCollision(bool is3D) {
-  float damping = 0.8f;
 
-  if (m_pos.x + m_rad > Constants::WORLD_WIDTH) {
-    m_pos.x = Constants::WORLD_WIDTH - m_rad;
-    m_vel.x *= -damping;
+  if (m_pos.x + m_rad > m_constants.WORLD_WIDTH) {
+    m_pos.x = m_constants.WORLD_WIDTH - m_rad;
+    m_vel.x *= -m_constants.VERTICAL_DAMPING;
   } else if (m_pos.x - m_rad < 0) {
     m_pos.x = m_rad;
-    m_vel.x *= -damping;
+    m_vel.x *= -m_constants.VERTICAL_DAMPING;
   }
-  if (m_pos.y + m_rad > Constants::WORLD_HEIGHT) {
-    m_pos.y = Constants::WORLD_HEIGHT - m_rad;
-    m_vel.y *= -damping;
+  if (m_pos.y + m_rad > m_constants.WORLD_HEIGHT) {
+    m_pos.y = m_constants.WORLD_HEIGHT - m_rad;
+    m_vel.y *= -m_constants.VERTICAL_DAMPING;
   } else if (m_pos.y - m_rad < 0) {
     m_pos.y = m_rad;
-    m_vel.y *= -damping;
+    m_vel.y *= -m_constants.VERTICAL_DAMPING;
   }
 
   if (is3D) {
-    if (m_pos.z + m_rad > Constants::WORLD_DEPTH) {
-      m_pos.z = Constants::WORLD_DEPTH - m_rad;
-      m_vel.z *= -damping;
+    if (m_pos.z + m_rad > m_constants.WORLD_DEPTH) {
+      m_pos.z = m_constants.WORLD_DEPTH - m_rad;
+      m_vel.z *= -m_constants.VERTICAL_DAMPING;
     } else if (m_pos.z - m_rad < 0) {
       m_pos.z = m_rad;
-      m_vel.z *= -damping;
+      m_vel.z *= -m_constants.VERTICAL_DAMPING;
     }
   }
 }
 
-void collision(PhysicsObject &o1, PhysicsObject &o2, bool is3D, float restitution) {
+void collision(PhysicsObject &o1, PhysicsObject &o2,
+               const SimulationConstants &constants) {
   glm::vec3 pos1 = o1.position();
   glm::vec3 pos2 = o2.position();
-  if (!is3D) {
+  if (!constants.USE_3D) {
     pos1.z = 0;
     pos2.z = 0;
   }
@@ -93,8 +92,9 @@ void collision(PhysicsObject &o1, PhysicsObject &o2, bool is3D, float restitutio
     o2.updatePos(normal * overlap * c2_correction_ratio);
   }
 
-  float j = (-(1.0f + restitution) * vel_along_normal) /
-            ((1.0f / o1.mass()) + (1.0f / o2.mass()));
+  float j =
+      (-(1.0f + constants.COEFFICIENT_OF_RESTITUTION) * vel_along_normal) /
+      ((1.0f / o1.mass()) + (1.0f / o2.mass()));
   glm::vec3 impulse = j * normal;
 
   o1.updateVel(o1.velocity() - impulse / o1.mass());

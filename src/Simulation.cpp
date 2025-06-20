@@ -1,20 +1,20 @@
 #include "../include/Simulation.hpp"
-#include "../include/Constants.hpp"
-
 #include "imgui.h"
-
+#include "imgui_impl_opengl3.h"
 #include <chrono>
 #include <iostream>
 #include <thread>
 
 Simulation::Simulation()
-    : m_camera(glm::vec3(Constants::WORLD_WIDTH / 2.0f,
-                         Constants::WORLD_HEIGHT / 2.0f, 3000.0f)),
-      m_window(1920, 1080, "Physics Engine", &m_camera, true),
-      m_grid(Constants::WORLD_WIDTH, Constants::WORLD_HEIGHT,
-             Constants::WORLD_DEPTH,
-             Constants::USE_3D ? Constants::CELL_SIZE_3D
-                               : Constants::CELL_SIZE_2D) {
+    : m_camera(glm::vec3(m_constants.WORLD_WIDTH / 2.0f,
+                         m_constants.WORLD_HEIGHT / 2.0f, 3000.0f),
+               glm::vec3(0.0f, 1.0f, 0.0f), -90.0f, 0.0f, m_constants),
+      m_window(1920, 1080, "Physics Engine", &m_camera, m_constants.USE_3D),
+      m_renderer(m_constants),
+      m_grid(m_constants.WORLD_WIDTH, m_constants.WORLD_HEIGHT,
+             m_constants.WORLD_DEPTH,
+             m_constants.USE_3D ? m_constants.CELL_SIZE_3D
+                                : m_constants.CELL_SIZE_2D) {
   m_gui.init(m_window.getGlfwWindow());
   restart();
 }
@@ -23,10 +23,12 @@ Simulation::~Simulation() { m_gui.shutdown(); }
 
 void Simulation::restart() {
   m_objects.clear();
-  for (size_t i = 0; i < NUM_OBJECTS; ++i) {
+  for (int i = 0; i < m_constants.NUM_OBJECTS; ++i) {
     m_objects.emplace_back(std::make_unique<PhysicsObject>(
-        USE_3D, OBJECT_DEFAULT_RADIUS,
-        OBJECT_DEFAULT_RADIUS * OBJECT_DEFAULT_RADIUS));
+        m_constants, // Pass m_constants to PhysicsObject constructor
+        m_constants.USE_3D, m_constants.OBJECT_DEFAULT_RADIUS,
+        m_constants.OBJECT_DEFAULT_MASS)); // Use OBJECT_DEFAULT_MASS for object
+                                           // creation
   }
 }
 
@@ -66,26 +68,26 @@ void Simulation::run() {
     m_window.processInput(frame_delta_time);
 
     const float SUB_DELTA_TIME =
-        Constants::FIXED_DELTA_TIME / Constants::PHYSICS_ITERATIONS;
-    for (int iter = 0; iter < Constants::PHYSICS_ITERATIONS; ++iter) {
+        m_constants.FIXED_DELTA_TIME / m_constants.PHYSICS_ITERATIONS;
+    for (int iter = 0; iter < m_constants.PHYSICS_ITERATIONS; ++iter) {
       for (auto &obj_ptr : m_objects) {
-        obj_ptr->update(SUB_DELTA_TIME, USE_3D, GRAVITY);
+        obj_ptr->update(SUB_DELTA_TIME);
       }
       m_grid.clear();
       for (const auto &obj_ptr : m_objects) {
-        m_grid.insert(obj_ptr, USE_3D);
+        m_grid.insert(obj_ptr, m_constants.USE_3D);
       }
 
       const unsigned int num_threads = std::thread::hardware_concurrency();
       std::vector<std::thread> threads;
-      size_t chunk_size = NUM_OBJECTS / num_threads;
+      size_t chunk_size = m_constants.NUM_OBJECTS / num_threads;
       size_t current_start_idx = 0;
       for (unsigned int t = 0; t < num_threads; ++t) {
         size_t end_idx = current_start_idx + chunk_size +
-                         (t < (NUM_OBJECTS % num_threads) ? 1 : 0);
+                         (t < (m_constants.NUM_OBJECTS % num_threads) ? 1 : 0);
         threads.emplace_back(checkCollisionsForChunk, std::ref(m_objects),
                              std::ref(m_grid), current_start_idx, end_idx,
-                             USE_3D, COEFFICIENT_OF_RESTITUTION);
+                             m_constants);
         current_start_idx = end_idx;
       }
       for (std::thread &t : threads) {
@@ -104,7 +106,7 @@ void Simulation::run() {
     glm::mat4 projection =
         m_camera.getProjectionMatrix((float)display_w / (float)display_h);
 
-    if (USE_3D) {
+    if (m_constants.USE_3D) {
       m_renderer.renderContainerBox(view, projection);
       m_renderer.renderFloor(view, projection);
     }
@@ -112,12 +114,14 @@ void Simulation::run() {
     for (const auto &obj_ptr : m_objects) {
       m_renderer.renderObject(obj_ptr->position(), obj_ptr->radius(),
                               obj_ptr->color(), (float)display_w,
-                              (float)display_h, USE_3D, view, projection);
+                              (float)display_h, m_constants.USE_3D, view,
+                              projection);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     m_gui.render(*this, fbo_texture, display_w, display_h);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     ImGuiIO &io = ImGui::GetIO();
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
@@ -137,13 +141,14 @@ void Simulation::run() {
 
 void Simulation::checkCollisionsForChunk(
     const std::vector<std::unique_ptr<PhysicsObject>> &objects,
-    SpatialGrid &grid, size_t start_idx, size_t end_idx, bool is_3d,
-    float restitution) {
+    SpatialGrid &grid, size_t start_idx, size_t end_idx,
+    const SimulationConstants &constants) {
   for (size_t i = start_idx; i < end_idx; ++i) {
-    auto potential_colliders = grid.getPotentialColliders(objects[i], is_3d);
+    auto potential_colliders =
+        grid.getPotentialColliders(objects[i], constants.USE_3D);
     for (PhysicsObject *other_object : potential_colliders) {
       if (objects[i].get() < other_object) {
-        collision(*objects[i], *other_object, is_3d, restitution);
+        collision(*objects[i], *other_object, constants);
       }
     }
   }

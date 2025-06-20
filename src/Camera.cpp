@@ -1,18 +1,17 @@
 #include "../include/Camera.hpp"
-#include "../include/Constants.hpp"
 
-Camera::Camera(glm::vec3 position, glm::vec3 up, float yaw, float pitch)
+Camera::Camera(glm::vec3 position, glm::vec3 up, float yaw, float pitch,
+               const SimulationConstants &constants)
     : Front(glm::vec3(0.0f, 0.0f, -1.0f)),
-      MovementSpeed(Constants::CAMERA_MOVEMENT_SPEED),
-      MouseSensitivity(Constants::CAMERA_MOUSE_SENSITIVITY),
-      Fov(Constants::CAMERA_FOV) {
+      MovementSpeed(constants.CAMERA_MOVEMENT_SPEED),
+      MouseSensitivity(constants.CAMERA_MOUSE_SENSITIVITY),
+      Fov(constants.CAMERA_FOV), m_constants(constants) {
   Position = position;
   WorldUp = up;
   Yaw = yaw;
   Pitch = pitch;
   updateCameraVectors();
 }
-
 glm::mat4 Camera::getViewMatrix() {
   return glm::lookAt(Position, Position + Front, Up);
 }
