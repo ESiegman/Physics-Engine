@@ -4,15 +4,25 @@
 #include "Constants.hpp"
 #include "GUI.hpp"
 #include "PhysicsObject.hpp"
-#include "Renderer.hpp"
+#include "Shader.hpp"
 #include "SpatialGrid.hpp"
 #include "Window.hpp"
 
 #include <cstddef>
+#include <glm/glm.hpp>
 #include <memory>
 #include <vector>
 
-class GUI;
+struct PointLight {
+  glm::vec3 position;
+  glm::vec3 color;
+  float intensity;
+};
+
+struct GpuGridCell {
+  unsigned int objectStartIndex;
+  unsigned int objectCount;
+};
 
 class Simulation {
 public:
@@ -31,11 +41,13 @@ private:
 
   Camera m_camera;
   Window m_window;
-  Renderer m_renderer;
   std::vector<std::unique_ptr<PhysicsObject>> m_objects;
   SpatialGrid m_grid;
   GUI m_gui;
   bool m_worldDimensionsChanged = false;
+
+  Shader *m_raytracingComputeShader;
+  std::vector<PointLight> m_pointLights;
 
   static void checkCollisionsForChunk(
       const std::vector<std::unique_ptr<PhysicsObject>> &objects,

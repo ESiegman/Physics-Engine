@@ -1,25 +1,53 @@
 #include "../include/Simulation.hpp"
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <thread>
+
+struct ShaderPhysicsObjectData {
+  glm::vec3 position;
+  float radius;
+  glm::vec3 color;
+  float padding1;
+};
+
+struct ShaderPointLightData {
+  glm::vec3 position;
+  float intensity;
+  glm::vec3 color;
+  float padding2;
+};
 
 Simulation::Simulation()
     : m_camera(glm::vec3(m_constants.WORLD_WIDTH / 2.0f,
                          m_constants.WORLD_HEIGHT / 2.0f, 3000.0f),
                glm::vec3(0.0f, 1.0f, 0.0f), -90.0f, 0.0f, m_constants),
       m_window(1920, 1080, "Physics Engine", &m_camera, m_constants.USE_3D),
-      m_renderer(m_constants),
       m_grid(m_constants.WORLD_WIDTH, m_constants.WORLD_HEIGHT,
              m_constants.WORLD_DEPTH,
              m_constants.USE_3D ? m_constants.CELL_SIZE_3D
                                 : m_constants.CELL_SIZE_2D) {
   m_gui.init(m_window.getGlfwWindow());
+
+  m_raytracingComputeShader =
+      new Shader("shaders/raytracer.comp", ShaderType::COMPUTE_SHADER);
+
+  m_pointLights.push_back({glm::vec3(m_constants.WORLD_WIDTH / 2.0f,
+                                     m_constants.WORLD_HEIGHT / 2.0f,
+                                     m_constants.WORLD_DEPTH / 2.0f),
+                           glm::vec3(1.0f, 1.0f, 1.0f), 1.0f});
+  m_pointLights.push_back({glm::vec3(0.0f, m_constants.WORLD_HEIGHT, 0.0f),
+                           glm::vec3(0.8f, 0.5f, 0.3f), 0.7f});
+
   restart();
 }
 
-Simulation::~Simulation() { m_gui.shutdown(); }
+Simulation::~Simulation() {
+  m_gui.shutdown();
+  delete m_raytracingComputeShader;
+}
 
 void Simulation::restart() {
   m_objects.clear();
@@ -41,7 +69,7 @@ void Simulation::run() {
 
   glGenTextures(1, &fbo_texture);
   glBindTexture(GL_TEXTURE_2D, fbo_texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1920, 1080, 0, GL_RGB,
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1920, 1080, 0, GL_RGBA,
                GL_UNSIGNED_BYTE, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -60,6 +88,12 @@ void Simulation::run() {
 
   auto last_time = std::chrono::high_resolution_clock::now();
   int display_w = 1920, display_h = 1080;
+
+  GLuint objectSSBO, lightSSBO, gridCellsSSBO, objectIndicesSSBO;
+  glGenBuffers(1, &objectSSBO);
+  glGenBuffers(1, &lightSSBO);
+  glGenBuffers(1, &gridCellsSSBO);
+  glGenBuffers(1, &objectIndicesSSBO);
 
   while (!m_window.shouldClose()) {
     auto current_time = std::chrono::high_resolution_clock::now();
@@ -99,33 +133,130 @@ void Simulation::run() {
     }
 
     if (m_worldDimensionsChanged) {
-      m_renderer.updateContainerBoxGeometry();
       m_worldDimensionsChanged = false;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glViewport(0, 0, display_w, display_h);
-
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    glm::mat4 view = m_camera.getViewMatrix();
-    glm::mat4 projection =
-        m_camera.getProjectionMatrix((float)display_w / (float)display_h);
-
-    if (m_constants.USE_3D) {
-      m_renderer.renderContainerBox(view, projection);
-      m_renderer.renderFloor(view, projection);
+    std::vector<ShaderPhysicsObjectData> shaderObjects(m_objects.size());
+    for (size_t i = 0; i < m_objects.size(); ++i) {
+      shaderObjects[i].position = m_objects[i]->position();
+      shaderObjects[i].radius = m_objects[i]->radius();
+      shaderObjects[i].color = m_objects[i]->color();
     }
 
-    for (const auto &obj_ptr : m_objects) {
-      m_renderer.renderObject(obj_ptr->position(), obj_ptr->radius(),
-                              obj_ptr->color(), (float)display_w,
-                              (float)display_h, m_constants.USE_3D, view,
-                              projection);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, objectSSBO);
+    glBufferData(GL_SHADER_STORAGE_BUFFER,
+                 shaderObjects.size() * sizeof(ShaderPhysicsObjectData),
+                 shaderObjects.data(), GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, objectSSBO);
+
+    std::vector<ShaderPointLightData> shaderLights(m_pointLights.size());
+    for (size_t i = 0; i < m_pointLights.size(); ++i) {
+      shaderLights[i].position = m_pointLights[i].position;
+      shaderLights[i].intensity = m_pointLights[i].intensity;
+      shaderLights[i].color = m_pointLights[i].color;
     }
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, lightSSBO);
+    glBufferData(GL_SHADER_STORAGE_BUFFER,
+                 shaderLights.size() * sizeof(ShaderPointLightData),
+                 shaderLights.data(), GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, lightSSBO);
+
+    std::vector<GpuGridCell> gpuGridCells;
+    std::vector<unsigned int> gpuObjectIndices;
+
+    unsigned int currentObjectIndexOffset = 0;
+    int cellsX = static_cast<int>(
+        std::ceil(m_constants.WORLD_WIDTH / (m_constants.USE_3D
+                                                 ? m_constants.CELL_SIZE_3D
+                                                 : m_constants.CELL_SIZE_2D)));
+    int cellsY = static_cast<int>(
+        std::ceil(m_constants.WORLD_HEIGHT / (m_constants.USE_3D
+                                                  ? m_constants.CELL_SIZE_3D
+                                                  : m_constants.CELL_SIZE_2D)));
+    int cellsZ = static_cast<int>(
+        std::ceil(m_constants.WORLD_DEPTH / (m_constants.USE_3D
+                                                 ? m_constants.CELL_SIZE_3D
+                                                 : m_constants.CELL_SIZE_2D)));
+
+    if (cellsX == 0)
+      cellsX = 1;
+    if (cellsY == 0)
+      cellsY = 1;
+    if (cellsZ == 0)
+      cellsZ = 1;
+
+    gpuGridCells.resize(cellsX * cellsY * cellsZ);
+
+    for (int z = 0; z < cellsZ; ++z) {
+      for (int y = 0; y < cellsY; ++y) {
+        for (int x = 0; x < cellsX; ++x) {
+          glm::ivec3 coords = glm::ivec3(x, y, z);
+          int index = x + y * cellsX + z * cellsX * cellsY;
+          const std::vector<PhysicsObject *> &cellObjects =
+              m_grid.getInternalCellObjects(coords);
+
+          gpuGridCells[index].objectStartIndex = currentObjectIndexOffset;
+          gpuGridCells[index].objectCount = cellObjects.size();
+
+          for (PhysicsObject *obj : cellObjects) {
+            ptrdiff_t objIdx = -1;
+            for (size_t i = 0; i < m_objects.size(); ++i) {
+              if (m_objects[i].get() == obj) {
+                objIdx = i;
+                break;
+              }
+            }
+            if (objIdx != -1) {
+              gpuObjectIndices.push_back(static_cast<unsigned int>(objIdx));
+            }
+          }
+          currentObjectIndexOffset += cellObjects.size();
+        }
+      }
+    }
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, gridCellsSSBO);
+    glBufferData(GL_SHADER_STORAGE_BUFFER,
+                 gpuGridCells.size() * sizeof(GpuGridCell), gpuGridCells.data(),
+                 GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, gridCellsSSBO);
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, objectIndicesSSBO);
+    glBufferData(GL_SHADER_STORAGE_BUFFER,
+                 gpuObjectIndices.size() * sizeof(unsigned int),
+                 gpuObjectIndices.data(), GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, objectIndicesSSBO);
+
+    m_raytracingComputeShader->use();
+    m_raytracingComputeShader->setVec3("cameraPos", m_camera.Position);
+    m_raytracingComputeShader->setMat4("viewInverse",
+                                       glm::inverse(m_camera.getViewMatrix()));
+    m_raytracingComputeShader->setMat4(
+        "projectionInverse", glm::inverse(m_camera.getProjectionMatrix(
+                                 (float)display_w / (float)display_h)));
+    m_raytracingComputeShader->setInt("numObjects", m_objects.size());
+    m_raytracingComputeShader->setInt("numLights", m_pointLights.size());
+    m_raytracingComputeShader->setFloat("aspectRatio",
+                                        (float)display_w / (float)display_h);
+    m_raytracingComputeShader->setInt("gridCellsX", cellsX);
+    m_raytracingComputeShader->setInt("gridCellsY", cellsY);
+    m_raytracingComputeShader->setInt("gridCellsZ", cellsZ);
+    m_raytracingComputeShader->setFloat(
+        "cellSize", m_constants.USE_3D ? m_constants.CELL_SIZE_3D
+                                       : m_constants.CELL_SIZE_2D);
+    m_raytracingComputeShader->setBool("use3D", m_constants.USE_3D);
+    m_raytracingComputeShader->setVec3("worldDimensions",
+                                       glm::vec3(m_constants.WORLD_WIDTH,
+                                                 m_constants.WORLD_HEIGHT,
+                                                 m_constants.WORLD_DEPTH));
+    glBindImageTexture(0, fbo_texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+    glDispatchCompute((GLuint)std::ceil((float)display_w / 8.0f),
+                      (GLuint)std::ceil((float)display_h / 8.0f), 1);
+
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     m_gui.render(*this, fbo_texture, display_w, display_h);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -140,6 +271,11 @@ void Simulation::run() {
 
     m_window.swapBuffersAndPollEvents();
   }
+
+  glDeleteBuffers(1, &objectSSBO);
+  glDeleteBuffers(1, &lightSSBO);
+  glDeleteBuffers(1, &gridCellsSSBO);
+  glDeleteBuffers(1, &objectIndicesSSBO);
 
   glDeleteFramebuffers(1, &fbo);
   glDeleteTextures(1, &fbo_texture);

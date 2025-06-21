@@ -40,6 +40,15 @@ public:
 
   void clear();
 
+  const std::vector<PhysicsObject *> &
+  getInternalCellObjects(glm::ivec3 coords) {
+    if (!isValidCell(coords)) {
+      static const std::vector<PhysicsObject *> emptyVec;
+      return emptyVec;
+    }
+    return m_grid[get1DIndex(coords)];
+  }
+
 private:
   glm::ivec3 getCellCoords(const glm::vec3 &pos);
   int get1DIndex(const glm::ivec3 &coords);
