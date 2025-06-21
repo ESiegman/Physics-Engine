@@ -4,21 +4,6 @@
 #include <chrono>
 #include <iostream>
 #include <map>
-#include <thread>
-
-struct ShaderPhysicsObjectData {
-  glm::vec3 position;
-  float radius;
-  glm::vec3 color;
-  float padding1;
-};
-
-struct ShaderPointLightData {
-  glm::vec3 position;
-  float intensity;
-  glm::vec3 color;
-  float padding2;
-};
 
 struct GpuPhysicsObject {
   glm::vec3 position;
@@ -41,6 +26,47 @@ void checkGLErrors(const char *label) {
   }
 }
 
+void Simulation::resizeGpuBuffers() {
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_objectSSBO);
+  glBufferData(GL_SHADER_STORAGE_BUFFER,
+               m_constants.NUM_OBJECTS * sizeof(GpuPhysicsObject), nullptr,
+               GL_DYNAMIC_DRAW);
+
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_lightSSBO);
+  glBufferData(GL_SHADER_STORAGE_BUFFER,
+               m_pointLights.size() * sizeof(GpuPointLight), nullptr,
+               GL_DYNAMIC_DRAW);
+
+  float current_cell_size =
+      m_constants.USE_3D ? m_constants.CELL_SIZE_3D : m_constants.CELL_SIZE_2D;
+  int cellsX =
+      static_cast<int>(std::ceil(m_constants.WORLD_WIDTH / current_cell_size));
+  int cellsY =
+      static_cast<int>(std::ceil(m_constants.WORLD_HEIGHT / current_cell_size));
+  int cellsZ =
+      static_cast<int>(std::ceil(m_constants.WORLD_DEPTH / current_cell_size));
+  if (cellsX == 0)
+    cellsX = 1;
+  if (cellsY == 0)
+    cellsY = 1;
+  if (cellsZ == 0)
+    cellsZ = 1;
+
+  size_t total_grid_cells = static_cast<size_t>(cellsX * cellsY * cellsZ);
+
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_gridCellsSSBO);
+  glBufferData(GL_SHADER_STORAGE_BUFFER, total_grid_cells * sizeof(GpuGridCell),
+               nullptr, GL_DYNAMIC_DRAW);
+
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_objectIndicesSSBO);
+  glBufferData(GL_SHADER_STORAGE_BUFFER,
+               m_constants.NUM_OBJECTS * RESERVE_PER_CELL * 4 *
+                   sizeof(unsigned int),
+               nullptr, GL_DYNAMIC_DRAW);
+
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+}
+
 Simulation::Simulation()
     : m_camera(glm::vec3(m_constants.WORLD_WIDTH / 2.0f,
                          m_constants.WORLD_HEIGHT / 2.0f, 3000.0f),
@@ -51,7 +77,8 @@ Simulation::Simulation()
              m_constants.USE_3D ? m_constants.CELL_SIZE_3D
                                 : m_constants.CELL_SIZE_2D),
       m_fbo(0), m_fboTexture(0), m_rbo(0), m_currentDisplayW(1920),
-      m_currentDisplayH(1080) {
+      m_currentDisplayH(1080), m_threadPool(std::make_unique<ThreadPool>(
+                                   std::thread::hardware_concurrency())) {
   m_gui.init(m_window.getGlfwWindow());
 
   m_raytracingComputeShader =
@@ -74,7 +101,7 @@ Simulation::Simulation()
   m_pointLights.push_back({glm::vec3(m_constants.WORLD_WIDTH / 2.0f,
                                      m_constants.WORLD_HEIGHT + 5000,
                                      m_constants.WORLD_DEPTH / 2.0f),
-                           glm::vec3(1.0f, 1.0f, 1.0f), 250.0f});
+                           glm::vec3(1.0f, 1.0f, 1.0f), 150.0f});
 
   glGenFramebuffers(1, &m_fbo);
   glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
@@ -99,14 +126,20 @@ Simulation::Simulation()
     std::cerr << "Framebuffer incomplete!" << std::endl;
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-  restart();
+  glGenBuffers(1, &m_objectSSBO);
+  glGenBuffers(1, &m_lightSSBO);
+  glGenBuffers(1, &m_gridCellsSSBO);
+  glGenBuffers(1, &m_objectIndicesSSBO);
+
+  resizeGpuBuffers();
+
+  restart(); // This will now just set the flag
 }
 
 Simulation::~Simulation() {
   m_gui.shutdown();
   delete m_raytracingComputeShader;
 
-  // Delete FBO resources
   glDeleteBuffers(1, &m_objectSSBO);
   glDeleteBuffers(1, &m_lightSSBO);
   glDeleteBuffers(1, &m_gridCellsSSBO);
@@ -118,27 +151,17 @@ Simulation::~Simulation() {
 }
 
 void Simulation::restart() {
-  m_objects.clear();
-  for (int i = 0; i < m_constants.NUM_OBJECTS; ++i) {
-    m_objects.emplace_back(std::make_unique<PhysicsObject>(
-        m_constants, m_constants.USE_3D, m_constants.OBJECT_DEFAULT_RADIUS,
-        m_constants.OBJECT_DEFAULT_MASS));
-  }
+  // Set flag, actual restart logic will happen in run()
+  m_pendingRestart = true;
 }
 
 void Simulation::notifyWorldDimensionsChanged() {
-  m_grid = SpatialGrid(m_constants.WORLD_WIDTH, m_constants.WORLD_HEIGHT,
-                       m_constants.WORLD_DEPTH,
-                       m_constants.USE_3D ? m_constants.CELL_SIZE_3D
-                                          : m_constants.CELL_SIZE_2D);
+  // Set flag, actual resize logic will happen in run()
+  m_pendingWorldResize = true;
 }
 
 void Simulation::run() {
   auto last_time = std::chrono::high_resolution_clock::now();
-  glGenBuffers(1, &m_objectSSBO);
-  glGenBuffers(1, &m_lightSSBO);
-  glGenBuffers(1, &m_gridCellsSSBO);
-  glGenBuffers(1, &m_objectIndicesSSBO);
 
   while (!m_window.shouldClose()) {
 
@@ -148,6 +171,26 @@ void Simulation::run() {
     last_time = current_time;
 
     m_window.processInput(frame_delta_time);
+
+    if (m_pendingRestart) {
+      m_objects.clear();
+      for (int i = 0; i < m_constants.NUM_OBJECTS; ++i) {
+        m_objects.emplace_back(std::make_unique<PhysicsObject>(
+            m_constants, m_constants.USE_3D, m_constants.OBJECT_DEFAULT_RADIUS,
+            m_constants.OBJECT_DEFAULT_MASS));
+      }
+      resizeGpuBuffers(); // Resize buffers after objects are repopulated
+      m_pendingRestart = false;
+    }
+
+    if (m_pendingWorldResize) {
+      m_grid = SpatialGrid(m_constants.WORLD_WIDTH, m_constants.WORLD_HEIGHT,
+                           m_constants.WORLD_DEPTH,
+                           m_constants.USE_3D ? m_constants.CELL_SIZE_3D
+                                              : m_constants.CELL_SIZE_2D);
+      resizeGpuBuffers(); // Resize buffers after grid is recreated
+      m_pendingWorldResize = false;
+    }
 
     const float SUB_DELTA_TIME =
         m_constants.FIXED_DELTA_TIME / m_constants.PHYSICS_ITERATIONS;
@@ -159,8 +202,8 @@ void Simulation::run() {
       for (const auto &obj_ptr : m_objects) {
         m_grid.insert(obj_ptr, m_constants.USE_3D);
       }
-      const unsigned int num_threads = std::thread::hardware_concurrency();
-      std::vector<std::thread> threads;
+      std::vector<std::future<void>> futures;
+      size_t num_threads = m_threadPool->getNumThreads();
       size_t chunk_size = m_objects.size() / num_threads;
       if (chunk_size == 0 && m_objects.size() > 0) {
         chunk_size = 1;
@@ -173,14 +216,13 @@ void Simulation::run() {
         if (t == num_threads - 1) {
           end_idx = m_objects.size();
         }
-        threads.emplace_back(checkCollisionsForChunk, std::ref(m_objects),
-                             std::ref(m_grid), current_start_idx, end_idx,
-                             m_constants);
+        futures.emplace_back(m_threadPool->enqueue(
+            checkCollisionsForChunk, std::ref(m_objects), std::ref(m_grid),
+            current_start_idx, end_idx, m_constants));
         current_start_idx = end_idx;
       }
-      for (std::thread &t : threads) {
-        if (t.joinable())
-          t.join();
+      for (auto &f : futures) {
+        f.get();
       }
     }
 
@@ -193,12 +235,14 @@ void Simulation::run() {
       shaderObjects[i].position = m_objects[i]->position();
       shaderObjects[i].radius = m_objects[i]->radius();
       shaderObjects[i].color = m_objects[i]->color();
-      shaderObjects[i].reflectivity = 0.95f; // Chrome-like reflectivity
+      shaderObjects[i].reflectivity = 0.75f;
     }
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_objectSSBO); // Use member SSBO
-    glBufferData(GL_SHADER_STORAGE_BUFFER,
-                 shaderObjects.size() * sizeof(GpuPhysicsObject),
-                 shaderObjects.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_objectSSBO);
+    if (!shaderObjects.empty()) {
+      glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0,
+                      shaderObjects.size() * sizeof(GpuPhysicsObject),
+                      shaderObjects.data());
+    }
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_objectSSBO);
 
     std::vector<GpuPointLight> shaderLights(m_pointLights.size());
@@ -206,11 +250,14 @@ void Simulation::run() {
       shaderLights[i].position = m_pointLights[i].position;
       shaderLights[i].intensity = m_pointLights[i].intensity;
       shaderLights[i].color = m_pointLights[i].color;
+      shaderLights[i].padding = 0.0f;
     }
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_lightSSBO); // Use member SSBO
-    glBufferData(GL_SHADER_STORAGE_BUFFER,
-                 shaderLights.size() * sizeof(GpuPointLight),
-                 shaderLights.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_lightSSBO);
+    if (!shaderLights.empty()) {
+      glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0,
+                      shaderLights.size() * sizeof(GpuPointLight),
+                      shaderLights.data());
+    }
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, m_lightSSBO);
 
     int cellsX = static_cast<int>(
@@ -274,28 +321,38 @@ void Simulation::run() {
         gpuGridCells[i].objectCount = 0;
       }
     }
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_gridCellsSSBO); // Use member SSBO
-    glBufferData(GL_SHADER_STORAGE_BUFFER,
-                 gpuGridCells.size() * sizeof(GpuGridCell), gpuGridCells.data(),
-                 GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_gridCellsSSBO);
+    if (!gpuGridCells.empty()) {
+      glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0,
+                      gpuGridCells.size() * sizeof(GpuGridCell),
+                      gpuGridCells.data());
+    } else {
+      glBufferData(GL_SHADER_STORAGE_BUFFER,
+                   gpuGridCells.size() * sizeof(GpuGridCell),
+                   gpuGridCells.data(), GL_DYNAMIC_DRAW);
+    }
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, m_gridCellsSSBO);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER,
-                 m_objectIndicesSSBO); // Use member SSBO
-    glBufferData(GL_SHADER_STORAGE_BUFFER,
-                 gpuObjectIndices.size() * sizeof(unsigned int),
-                 gpuObjectIndices.data(), GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_objectIndicesSSBO);
+    if (!gpuObjectIndices.empty()) {
+      glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0,
+                      gpuObjectIndices.size() * sizeof(unsigned int),
+                      gpuObjectIndices.data());
+    } else {
+      glBufferData(GL_SHADER_STORAGE_BUFFER,
+                   gpuObjectIndices.size() * sizeof(unsigned int),
+                   gpuObjectIndices.data(), GL_DYNAMIC_DRAW);
+    }
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, m_objectIndicesSSBO);
 
     int prev_display_w = m_currentDisplayW;
     int prev_display_h = m_currentDisplayH;
 
-    m_gui.render(*this, m_fboTexture, m_currentDisplayW,
-                 m_currentDisplayH); // Pass by reference
+    m_gui.render(*this, m_fboTexture, m_currentDisplayW, m_currentDisplayH);
 
-    if (m_currentDisplayW <= 0 ||
-        m_currentDisplayH <= 0) { // Handle minimized window
+    if (m_currentDisplayW <= 0 || m_currentDisplayH <= 0) {
       m_window.swapBuffersAndPollEvents();
-      continue; // Skip rendering if window is minimized
+      continue;
     }
 
     if (m_currentDisplayW != prev_display_w ||
@@ -325,13 +382,12 @@ void Simulation::run() {
 
       if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         std::cerr << "Framebuffer incomplete after resize!" << std::endl;
-      glBindFramebuffer(GL_FRAMEBUFFER, 0); // Unbind FBO
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-    glViewport(0, 0, m_currentDisplayW,
-               m_currentDisplayH); // Set viewport to match FBO texture size
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // Clear the FBO
+    glViewport(0, 0, m_currentDisplayW, m_currentDisplayH);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     m_raytracingComputeShader->use();
 
@@ -376,10 +432,7 @@ void Simulation::run() {
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER,
-                      0); // Unbind FBO, render to default framebuffer
-    // Clear the default framebuffer for ImGui to draw on top of (optional,
-    // depends on overlay needs)
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

@@ -3,8 +3,6 @@
 #include <cmath>
 #include <iostream>
 
-const int RESERVE_PER_CELL = 20;
-
 SpatialGrid::SpatialGrid(float width, float height, float depth, float cellSize)
     : m_cellSize(cellSize) {
   m_cellsX = static_cast<int>(std::ceil(width / m_cellSize));

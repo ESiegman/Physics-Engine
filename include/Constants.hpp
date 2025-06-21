@@ -2,6 +2,8 @@
 
 #include <cstddef>
 
+const int RESERVE_PER_CELL = 20;
+
 struct SimulationConstants {
   bool USE_3D;
   float WORLD_WIDTH;

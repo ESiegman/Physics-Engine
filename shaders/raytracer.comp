@@ -52,7 +52,7 @@ uniform float cellSize;
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 const float EPSILON = 0.001;
-const int MAX_BOUNCES = 3;
+const int MAX_BOUNCES = 8;
 const float MAX_DIST = 100000.0;
 
 struct Ray {
@@ -310,8 +310,7 @@ void main() {
 
     for (int bounce = 0; bounce < MAX_BOUNCES; ++bounce) {
         if (trace(ray, hit)) {
-            // Enhanced ambient light: now a combined global and object-specific tint
-            vec3 globalAmbientColor = vec3(0.15, 0.15, 0.15); // A slightly stronger, neutral ambient light
+            vec3 globalAmbientColor = vec3(0.15, 0.15, 0.15); 
             vec3 ambientColor = hit.color * globalAmbientColor;
 
 
