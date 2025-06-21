@@ -8,6 +8,9 @@ bin/
 build/
 compile_commands.json
 
+# Perf
+perf.*
+
 # Generated code/libs
 glad-generated/
 
