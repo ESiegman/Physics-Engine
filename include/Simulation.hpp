@@ -24,6 +24,8 @@ public:
   void run();
   void restart();
 
+  void notifyWorldDimensionsChanged();
+
 private:
   friend class GUI;
 
@@ -33,6 +35,7 @@ private:
   std::vector<std::unique_ptr<PhysicsObject>> m_objects;
   SpatialGrid m_grid;
   GUI m_gui;
+  bool m_worldDimensionsChanged = false;
 
   static void checkCollisionsForChunk(
       const std::vector<std::unique_ptr<PhysicsObject>> &objects,

@@ -52,8 +52,8 @@ void generateUVSphere(std::vector<glm::vec3> &vertices,
   }
 }
 
-Renderer::Renderer(const SimulationConstants& constants)
-  : m_constants(constants) {
+Renderer::Renderer(const SimulationConstants &constants)
+    : m_constants(constants) {
   m_objectShader = new Shader("shaders/object.vert", "shaders/object.frag");
   m_lineShader = new Shader("shaders/line.vert", "shaders/line.frag");
   m_floorShader = new Shader("shaders/floor.vert", "shaders/floor.frag");
@@ -150,6 +150,31 @@ Renderer::~Renderer() {
   glDeleteVertexArrays(1, &m_sphereVAO);
   glDeleteBuffers(1, &m_sphereVBO);
   glDeleteBuffers(1, &m_sphereEBO);
+}
+
+void Renderer::updateContainerBoxGeometry() {
+  float w = m_constants.WORLD_WIDTH;
+  float h = m_constants.WORLD_HEIGHT;
+  float d = m_constants.WORLD_DEPTH;
+
+  std::vector<glm::vec3> boxVertices = {
+      glm::vec3(0, 0, 0), glm::vec3(w, 0, 0), glm::vec3(0, 0, 0),
+      glm::vec3(0, h, 0), glm::vec3(0, 0, 0), glm::vec3(0, 0, d),
+      glm::vec3(w, 0, 0), glm::vec3(w, h, 0), glm::vec3(w, 0, 0),
+      glm::vec3(w, 0, d), glm::vec3(0, h, 0), glm::vec3(w, h, 0),
+      glm::vec3(0, h, 0), glm::vec3(0, h, d), glm::vec3(0, 0, d),
+      glm::vec3(w, 0, d), glm::vec3(0, 0, d), glm::vec3(0, h, d),
+      glm::vec3(w, h, d), glm::vec3(0, h, d), glm::vec3(w, h, d),
+      glm::vec3(w, 0, d), glm::vec3(w, h, d), glm::vec3(w, h, 0)};
+
+  glBindVertexArray(m_boxVAO);
+  glBindBuffer(GL_ARRAY_BUFFER, m_boxVBO);
+  glBufferData(GL_ARRAY_BUFFER, boxVertices.size() * sizeof(glm::vec3),
+               boxVertices.data(), GL_STATIC_DRAW);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void *)0);
+  glEnableVertexAttribArray(0);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glBindVertexArray(0);
 }
 
 void Renderer::renderObject(glm::vec3 center, float radius, glm::vec3 color,

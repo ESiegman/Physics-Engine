@@ -25,11 +25,13 @@ void Simulation::restart() {
   m_objects.clear();
   for (int i = 0; i < m_constants.NUM_OBJECTS; ++i) {
     m_objects.emplace_back(std::make_unique<PhysicsObject>(
-        m_constants, // Pass m_constants to PhysicsObject constructor
-        m_constants.USE_3D, m_constants.OBJECT_DEFAULT_RADIUS,
-        m_constants.OBJECT_DEFAULT_MASS)); // Use OBJECT_DEFAULT_MASS for object
-                                           // creation
+        m_constants, m_constants.USE_3D, m_constants.OBJECT_DEFAULT_RADIUS,
+        m_constants.OBJECT_DEFAULT_MASS));
   }
+}
+
+void Simulation::notifyWorldDimensionsChanged() {
+  m_worldDimensionsChanged = true;
 }
 
 void Simulation::run() {
@@ -96,6 +98,11 @@ void Simulation::run() {
       }
     }
 
+    if (m_worldDimensionsChanged) {
+      m_renderer.updateContainerBoxGeometry();
+      m_worldDimensionsChanged = false;
+    }
+
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, display_w, display_h);
 
@@ -144,12 +151,11 @@ void Simulation::checkCollisionsForChunk(
     SpatialGrid &grid, size_t start_idx, size_t end_idx,
     const SimulationConstants &constants) {
   for (size_t i = start_idx; i < end_idx; ++i) {
-    auto potential_colliders =
-        grid.getPotentialColliders(objects[i], constants.USE_3D);
-    for (PhysicsObject *other_object : potential_colliders) {
-      if (objects[i].get() < other_object) {
-        collision(*objects[i], *other_object, constants);
-      }
-    }
+    grid.processPotentialColliders(
+        objects[i], constants.USE_3D, [&](PhysicsObject *other_object) {
+          if (objects[i].get() < other_object) {
+            collision(*objects[i], *other_object, constants);
+          }
+        });
   }
 }

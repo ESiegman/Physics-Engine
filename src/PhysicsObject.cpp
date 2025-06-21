@@ -1,6 +1,8 @@
 #include "../include/PhysicsObject.hpp"
 #include <glm/gtc/random.hpp>
 #include <random>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/norm.hpp>
 
 PhysicsObject::PhysicsObject(const SimulationConstants &constants, bool is3D,
                              float radius, float mass)
@@ -57,31 +59,36 @@ void PhysicsObject::preventBorderCollision(bool is3D) {
 
 void collision(PhysicsObject &o1, PhysicsObject &o2,
                const SimulationConstants &constants) {
-  glm::vec3 pos1 = o1.position();
-  glm::vec3 pos2 = o2.position();
+  glm::vec3 deltaPos = o2.position() - o1.position();
   if (!constants.USE_3D) {
-    pos1.z = 0;
-    pos2.z = 0;
+    deltaPos.z = 0;
   }
 
-  float distance = glm::distance(pos1, pos2);
+  float distanceSq = glm::dot(deltaPos, deltaPos);
   float sumRadii = o1.radius() + o2.radius();
+  float sumRadiiSq = sumRadii * sumRadii;
 
-  if (distance > sumRadii || distance < 1e-6f) {
+  if (distanceSq > sumRadiiSq) {
     return;
   }
 
-  std::lock(o1.m_mutex, o2.m_mutex);
-  std::lock_guard<std::mutex> lock1(o1.m_mutex, std::adopt_lock);
-  std::lock_guard<std::mutex> lock2(o2.m_mutex, std::adopt_lock);
+  float distance = std::sqrt(distanceSq);
 
-  glm::vec3 normal = glm::normalize(pos2 - pos1);
+  if (distance < 1e-6f) {
+    return;
+  }
+
+  glm::vec3 normal = deltaPos / distance;
   glm::vec3 rel_vel = o2.velocity() - o1.velocity();
   float vel_along_normal = glm::dot(rel_vel, normal);
 
   if (vel_along_normal > 0) {
     return;
   }
+
+  std::lock(o1.m_mutex, o2.m_mutex);
+  std::lock_guard<std::mutex> lock1(o1.m_mutex, std::adopt_lock);
+  std::lock_guard<std::mutex> lock2(o2.m_mutex, std::adopt_lock);
 
   float overlap = sumRadii - distance;
   if (overlap > 0) {

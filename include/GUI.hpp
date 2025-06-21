@@ -1,5 +1,4 @@
-#ifndef GUI_HPP
-#define GUI_HPP
+#pragma once
 
 #include <string>
 #include <vector>
@@ -20,5 +19,3 @@ private:
   bool m_firstTime = true;
   bool m_showCameraControlsWindow = false;
 };
-
-#endif

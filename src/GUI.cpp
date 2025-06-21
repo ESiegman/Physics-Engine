@@ -85,7 +85,7 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
   }
   ImGui::Separator();
 
-  ImGui::Text("Simulation Parameters (Restart Require for Change in Num)");
+  ImGui::Text("Simulation Parameters");
   int num_objects_val = sim.m_constants.NUM_OBJECTS;
   if (ImGui::InputInt("Number of Objects", &num_objects_val, 100, 1000)) {
     if (num_objects_val < 1)
@@ -101,10 +101,16 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
   ImGui::Checkbox("Use 3D", &sim.m_constants.USE_3D);
 
   ImGui::Separator();
-  ImGui::Text("World Dimensions (Restart Required for Full Effect)");
-  ImGui::InputFloat("World Width", &sim.m_constants.WORLD_WIDTH);
-  ImGui::InputFloat("World Height", &sim.m_constants.WORLD_HEIGHT);
-  ImGui::InputFloat("World Depth", &sim.m_constants.WORLD_DEPTH);
+  ImGui::Text("World Dimensions");
+  if (ImGui::InputFloat("World Width", &sim.m_constants.WORLD_WIDTH)) {
+      sim.notifyWorldDimensionsChanged();
+  }
+  if (ImGui::InputFloat("World Height", &sim.m_constants.WORLD_HEIGHT)) {
+      sim.notifyWorldDimensionsChanged();
+  }
+  if (ImGui::InputFloat("World Depth", &sim.m_constants.WORLD_DEPTH)) {
+      sim.notifyWorldDimensionsChanged();
+  }
 
   ImGui::Separator();
   ImGui::Text("Physics Engine Settings");

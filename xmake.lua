@@ -25,3 +25,6 @@ target("Physics_Engine")
 
     -- Ensure glew is present here
     add_packages("opengl", "glfw", "glm", "glew")
+
+    set_optimize("fastest")
+    add_ldflags("-flto")

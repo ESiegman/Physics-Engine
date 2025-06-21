@@ -16,6 +16,7 @@ public:
 
   void renderContainerBox(const glm::mat4 &view, const glm::mat4 &projection);
   void renderFloor(const glm::mat4 &view, const glm::mat4 &projection);
+  void updateContainerBoxGeometry();
 
 private:
   GLuint m_quadVAO, m_quadVBO;
