@@ -12,7 +12,7 @@ Window::Window(int width, int height, const char *title, Camera *camera,
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
+  glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
   m_glfwWindow = glfwCreateWindow(width, height, title, NULL, NULL);
   if (!m_glfwWindow) {
     std::cerr << "Failed to create GLFW window" << std::endl;

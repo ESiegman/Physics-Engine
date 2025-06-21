@@ -44,6 +44,7 @@ private:
   std::vector<std::unique_ptr<PhysicsObject>> m_objects;
   SpatialGrid m_grid;
   GUI m_gui;
+  glm::ivec2 m_debugPixel = glm::ivec2(960, 540);
   bool m_worldDimensionsChanged = false;
 
   Shader *m_raytracingComputeShader;

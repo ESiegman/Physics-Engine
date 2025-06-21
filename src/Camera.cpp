@@ -17,7 +17,7 @@ glm::mat4 Camera::getViewMatrix() {
 }
 
 glm::mat4 Camera::getProjectionMatrix(float aspectRatio) {
-  return glm::perspective(glm::radians(Fov), aspectRatio, 10.0f, 150000.0f);
+  return glm::perspective(glm::radians(Fov), aspectRatio, 10.0f, 50000.0f);
 }
 
 void Camera::processKeyboard(CameraMovement direction, float deltaTime) {

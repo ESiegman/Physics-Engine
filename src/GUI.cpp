@@ -103,13 +103,13 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
   ImGui::Separator();
   ImGui::Text("World Dimensions");
   if (ImGui::InputFloat("World Width", &sim.m_constants.WORLD_WIDTH)) {
-      sim.notifyWorldDimensionsChanged();
+    sim.notifyWorldDimensionsChanged();
   }
   if (ImGui::InputFloat("World Height", &sim.m_constants.WORLD_HEIGHT)) {
-      sim.notifyWorldDimensionsChanged();
+    sim.notifyWorldDimensionsChanged();
   }
   if (ImGui::InputFloat("World Depth", &sim.m_constants.WORLD_DEPTH)) {
-      sim.notifyWorldDimensionsChanged();
+    sim.notifyWorldDimensionsChanged();
   }
 
   ImGui::Separator();
@@ -139,6 +139,10 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
   ImGui::SliderFloat("Mouse Sensitivity",
                      &sim.m_constants.CAMERA_MOUSE_SENSITIVITY, 0.01f, 1.0f);
   ImGui::SliderFloat("FOV", &sim.m_constants.CAMERA_FOV, 30.0f, 90.0f);
+
+  ImGui::Separator();
+  ImGui::Text("Debug Settings");
+  ImGui::InputInt2("Debug Pixel (X, Y)", &sim.m_debugPixel[0]);
 
   ImGui::End();
 
