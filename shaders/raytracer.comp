@@ -3,258 +3,10 @@
 layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout (rgba8, binding = 0) uniform writeonly image2D outputImage;
 
-const vec3 BACKGROUND_COLOR = vec3(0.05, 0.08, 0.15);
-const vec3 FLOOR_COLOR_A = vec3(0.8);
-const vec3 FLOOR_COLOR_B = vec3(0.5);
-const float GLOBAL_AMBIENT = 0.25;
-const float SHADOW_BIAS = 0.05;
-const int MAX_RECURSION_DEPTH = 4;
-
-struct ShaderPhysicsObject {
-    vec3 position;
-    float radius;
-    vec3 color;
-    float reflectivity;
-};
-
-struct PointLight {
-    vec3 position;
-    float intensity;
-    vec3 color;
-    float padding;
-};
-
-struct GpuGridCell {
-    uint objectStartIndex;
-    uint objectCount;
-};
-
-layout (std140, binding = 1) readonly buffer ObjectsBuffer {
-    ShaderPhysicsObject objects[];
-};
-layout (std140, binding = 2) readonly buffer LightsBuffer {
-    PointLight lights[];
-};
-layout (std140, binding = 3) readonly buffer GpuGridCellsBuffer {
-    GpuGridCell gpuGridCells[];
-};
-layout (std140, binding = 4) readonly buffer GpuObjectIndicesBuffer {
-    uint gpuObjectIndices[];
-};
-
-uniform int numObjects;
-uniform int numLights;
 uniform vec3 cameraPos;
 uniform mat4 viewInverse;
 uniform mat4 projectionInverse;
-uniform int gridCellsX;
-uniform int gridCellsY;
-uniform int gridCellsZ;
-uniform float cellSize;
 uniform vec3 worldDimensions;
-
-struct Ray {
-    vec3 origin;
-    vec3 direction;
-};
-
-struct TraceResult {
-    bool hit;
-    float distance;
-    vec3 hitPoint;
-    vec3 normal;
-    int objectIndex;
-    int hitType; 
-    vec3 color;
-    float reflectivity;
-};
-
-float intersectSphere(Ray r, vec3 spherePos, float sphereRadius) {
-    vec3 oc = r.origin - spherePos;
-    float a = dot(r.direction, r.direction);
-    float b = 2.0 * dot(oc, r.direction);
-    float c = dot(oc, oc) - sphereRadius * sphereRadius;
-    float discriminant = b * b - 4.0 * a * c;
-    if (discriminant < 0.0) {
-        return 1e30;
-    } else {
-        float t = (-b - sqrt(discriminant)) / (2.0 * a);
-        if (t > 0.001) return t;
-        t = (-b + sqrt(discriminant)) / (2.0 * a);
-        if (t > 0.001) return t;
-        return 1e30;
-    }
-}
-
-float intersectPlane(Ray r, vec3 planeNormal, float planeOffset) {
-    float denom = dot(r.direction, planeNormal);
-    if (abs(denom) > 1e-6) {
-        float t = (planeOffset - dot(r.origin, planeNormal)) / denom;
-        if (t > 0.001) {
-            return t;
-        }
-    }
-    return 1e30;
-}
-
-int get1DIndex(ivec3 coords) {
-    return coords.x + coords.y * gridCellsX + coords.z * gridCellsX * gridCellsY;
-}
-
-bool isValidCell(ivec3 coords) {
-    return coords.x >= 0 && coords.x < gridCellsX &&
-           coords.y >= 0 && coords.y < gridCellsY &&
-           coords.z >= 0 && coords.z < gridCellsZ;
-}
-
-TraceResult findClosestHit(Ray r) {
-    TraceResult result;
-    result.hit = false;
-    result.distance = 1e30;
-    result.hitType = 0;
-
-    vec3 invDir = 1.0 / r.direction;
-    vec3 tNearPlanes = (vec3(0.0) - r.origin) * invDir;
-    vec3 tFarPlanes = (worldDimensions - r.origin) * invDir;
-    vec3 tMin = min(tNearPlanes, tFarPlanes);
-    vec3 tMax = max(tNearPlanes, tFarPlanes);
-
-    float tEnter = max(max(tMin.x, tMin.y), tMin.z);
-    float tExit = min(min(tMax.x, tMax.y), tMax.z);
-
-    if (tEnter < tExit && tExit >= 0.0) {
-        vec3 entryPoint = r.origin + r.direction * max(0.0, tEnter);
-        ivec3 currentCell = ivec3(floor(entryPoint / cellSize));
-        currentCell = clamp(currentCell, ivec3(0), ivec3(gridCellsX - 1, gridCellsY - 1, gridCellsZ - 1));
-
-        vec3 step = sign(r.direction);
-        vec3 tDelta = abs(vec3(cellSize) * invDir);
-        
-        vec3 cellBoundary = vec3(currentCell) * cellSize;
-        vec3 tMaxTotal;
-
-        for(int i = 0; i < 3; ++i) {
-            if (abs(r.direction[i]) < 1e-6) {
-                tMaxTotal[i] = 1e30;
-            } else if (step[i] > 0) {
-                tMaxTotal[i] = (cellBoundary[i] + cellSize - r.origin[i]) * invDir[i];
-            } else {
-                tMaxTotal[i] = (cellBoundary[i] - r.origin[i]) * invDir[i];
-            }
-        }
-        
-        for (int i = 0; i < 300; ++i) {
-            if (!isValidCell(currentCell)) break;
-            
-            int cellIdx = get1DIndex(currentCell);
-            GpuGridCell cell = gpuGridCells[cellIdx];
-
-            for (uint j = 0; j < cell.objectCount; ++j) {
-                uint objIdx = gpuObjectIndices[cell.objectStartIndex + j];
-                float dist = intersectSphere(r, objects[objIdx].position, objects[objIdx].radius);
-                if (dist < result.distance) {
-                    result.hit = true;
-                    result.distance = dist;
-                    result.objectIndex = int(objIdx);
-                    result.hitType = 1;
-                }
-            }
-
-            float tNextCross = min(min(tMaxTotal.x, tMaxTotal.y), tMaxTotal.z);
-            if (result.distance < tNextCross || tNextCross > tExit) break;
-            
-            if (tNextCross == tMaxTotal.x) {
-                currentCell.x += int(step.x);
-                tMaxTotal.x += tDelta.x;
-            } else if (tNextCross == tMaxTotal.y) {
-                currentCell.y += int(step.y);
-                tMaxTotal.y += tDelta.y;
-            } else {
-                currentCell.z += int(step.z);
-                tMaxTotal.z += tDelta.z;
-            }
-        }
-    }
-
-    float floorDist = intersectPlane(r, vec3(0, 1, 0), 0);
-    if (floorDist < result.distance) {
-        result.hit = true;
-        result.distance = floorDist;
-        result.hitType = 2;
-    }
-
-    if (result.hit) {
-        result.hitPoint = r.origin + r.direction * result.distance;
-        if (result.hitType == 1) {
-            result.normal = normalize(result.hitPoint - objects[result.objectIndex].position);
-            result.color = objects[result.objectIndex].color;
-            result.reflectivity = objects[result.objectIndex].reflectivity;
-        } else if (result.hitType == 2) {
-            result.normal = vec3(0, 1, 0);
-            result.reflectivity = 0.2;
-            vec2 c = floor(result.hitPoint.xz / (cellSize * 2.0));
-            result.color = (mod(c.x + c.y, 2.0) == 0) ? FLOOR_COLOR_A : FLOOR_COLOR_B;
-        }
-    }
-    return result;
-}
-
-vec3 shade(TraceResult res, Ray r) {
-    vec3 viewDir = -r.direction;
-    vec3 ambient = GLOBAL_AMBIENT * res.color;
-    vec3 lighting = ambient;
-
-    for (int i = 0; i < numLights; ++i) {
-        vec3 lightDir = lights[i].position - res.hitPoint;
-        float lightDist = length(lightDir);
-        lightDir = normalize(lightDir);
-
-        Ray shadowRay;
-        shadowRay.origin = res.hitPoint + res.normal * SHADOW_BIAS;
-        shadowRay.direction = lightDir;
-        TraceResult shadowRes = findClosestHit(shadowRay);
-        
-        if (shadowRes.hit && shadowRes.distance < lightDist) {
-            continue;
-        }
-
-        float lambertian = max(dot(lightDir, res.normal), 0.0);
-        vec3 diffuse = lambertian * res.color * lights[i].color * lights[i].intensity;
-
-        vec3 halfVec = normalize(lightDir + viewDir);
-        float specAngle = max(dot(halfVec, res.normal), 0.0);
-        float specular = pow(specAngle, 32.0);
-        vec3 specColor = specular * lights[i].color * lights[i].intensity * 0.5;
-        
-        lighting += diffuse + specColor;
-    }
-    return lighting;
-}
-
-vec3 trace(Ray r) {
-    vec3 finalColor = vec3(0.0);
-    vec3 rayColorAttenuation = vec3(1.0);
-
-    for (int depth = 0; depth < MAX_RECURSION_DEPTH; ++depth) {
-        TraceResult res = findClosestHit(r);
-
-        if (!res.hit) {
-            finalColor += BACKGROUND_COLOR * rayColorAttenuation;
-            break;
-        }
-
-        finalColor += shade(res, r) * rayColorAttenuation * (1.0 - res.reflectivity);
-        
-        if (res.reflectivity <= 0.0) {
-            break;
-        }
-
-        r.origin = res.hitPoint + res.normal * SHADOW_BIAS;
-        r.direction = reflect(r.direction, res.normal);
-        rayColorAttenuation *= res.reflectivity * res.color;
-    }
-    return finalColor;
-}
 
 void main() {
     ivec2 pixelCoords = ivec2(gl_GlobalInvocationID.xy);
@@ -264,19 +16,29 @@ void main() {
         return;
     }
 
+    // 1. Generate the Ray (Same logic as before)
     vec2 uv = (vec2(pixelCoords) + 0.5) / vec2(imageSize.x, imageSize.y);
     vec2 screenPos = uv * 2.0 - 1.0;
-
     vec4 clipPos = vec4(screenPos, 1.0, 1.0);
     vec4 viewPos = projectionInverse * clipPos;
     viewPos /= viewPos.w;
     vec4 worldPos = viewInverse * viewPos;
+    vec3 rayDir = normalize(vec3(worldPos) - cameraPos);
 
-    Ray r;
-    r.origin = cameraPos;
-    r.direction = normalize(vec3(worldPos) - cameraPos);
-    
-    vec3 finalColor = trace(r);
+    // 2. Perform the AABB intersection test (Slab Test)
+    vec3 invDir = 1.0 / rayDir;
+    vec3 tNearPlanes = (vec3(0.0) - cameraPos) * invDir;
+    vec3 tFarPlanes = (worldDimensions - cameraPos) * invDir;
+    vec3 tMin = min(tNearPlanes, tFarPlanes);
+    vec3 tMax = max(tNearPlanes, tFarPlanes);
+    float tEnter = max(max(tMin.x, tMin.y), tMin.z);
+    float tExit = min(min(tMax.x, tMax.y), tMax.z);
 
-    imageStore(outputImage, pixelCoords, vec4(clamp(finalColor, 0.0, 1.0), 1.0));
+    // 3. Visualize the result
+    vec3 finalColor = vec3(0.0, 0.0, 1.0); // Blue for "miss"
+    if (tEnter < tExit && tExit >= 0.0) {
+        finalColor = vec3(1.0, 0.0, 0.0); // Red for "hit"
+    }
+
+    imageStore(outputImage, pixelCoords, vec4(finalColor, 1.0));
 }
