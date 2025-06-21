@@ -34,24 +34,6 @@ struct GpuPointLight {
   float padding;
 };
 
-struct SceneData {
-  glm::vec3 cameraPos;
-  float padding1;
-  glm::mat4 viewInverse;
-  glm::mat4 projectionInverse;
-  glm::vec3 worldBoundsMin;
-  float padding2;
-  glm::vec3 worldBoundsMax;
-  float padding3;
-  glm::vec3 physicsBoundsMin;
-  float padding4;
-  glm::vec3 physicsBoundsMax;
-  float padding5;
-  glm::ivec2 debugPixelCoord;
-  int numLights;
-  int numObjects;
-};
-
 void checkGLErrors(const char *label) {
   GLenum err;
   while ((err = glGetError()) != GL_NO_ERROR) {
@@ -67,7 +49,9 @@ Simulation::Simulation()
       m_grid(m_constants.WORLD_WIDTH, m_constants.WORLD_HEIGHT,
              m_constants.WORLD_DEPTH,
              m_constants.USE_3D ? m_constants.CELL_SIZE_3D
-                                : m_constants.CELL_SIZE_2D) {
+                                : m_constants.CELL_SIZE_2D),
+      m_fbo(0), m_fboTexture(0), m_rbo(0), m_currentDisplayW(1920),
+      m_currentDisplayH(1080) {
   m_gui.init(m_window.getGlfwWindow());
 
   m_raytracingComputeShader =
@@ -88,12 +72,32 @@ Simulation::Simulation()
   }
 
   m_pointLights.push_back({glm::vec3(m_constants.WORLD_WIDTH / 2.0f,
-                                     m_constants.WORLD_HEIGHT / 2.0f,
+                                     m_constants.WORLD_HEIGHT + 5000,
                                      m_constants.WORLD_DEPTH / 2.0f),
-                           glm::vec3(1.0f, 1.0f, 1.0f), 1.0f});
-  m_pointLights.push_back(
-      {glm::vec3(0.0f, m_constants.WORLD_HEIGHT, 0.0f),
-       glm::vec3(1.0f, 1.0f, 1.0f), 3.0f});
+                           glm::vec3(1.0f, 1.0f, 1.0f), 250.0f});
+
+  glGenFramebuffers(1, &m_fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+
+  glGenTextures(1, &m_fboTexture);
+  glBindTexture(GL_TEXTURE_2D, m_fboTexture);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_currentDisplayW, m_currentDisplayH,
+               0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         m_fboTexture, 0);
+
+  glGenRenderbuffers(1, &m_rbo);
+  glBindRenderbuffer(GL_RENDERBUFFER, m_rbo);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, m_currentDisplayW,
+                        m_currentDisplayH);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                            GL_RENDERBUFFER, m_rbo);
+
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    std::cerr << "Framebuffer incomplete!" << std::endl;
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
   restart();
 }
@@ -101,6 +105,16 @@ Simulation::Simulation()
 Simulation::~Simulation() {
   m_gui.shutdown();
   delete m_raytracingComputeShader;
+
+  // Delete FBO resources
+  glDeleteBuffers(1, &m_objectSSBO);
+  glDeleteBuffers(1, &m_lightSSBO);
+  glDeleteBuffers(1, &m_gridCellsSSBO);
+  glDeleteBuffers(1, &m_objectIndicesSSBO);
+
+  glDeleteFramebuffers(1, &m_fbo);
+  glDeleteTextures(1, &m_fboTexture);
+  glDeleteRenderbuffers(1, &m_rbo);
 }
 
 void Simulation::restart() {
@@ -120,37 +134,11 @@ void Simulation::notifyWorldDimensionsChanged() {
 }
 
 void Simulation::run() {
-  GLuint fbo, fbo_texture, rbo;
-  glGenFramebuffers(1, &fbo);
-  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-
-  glGenTextures(1, &fbo_texture);
-  glBindTexture(GL_TEXTURE_2D, fbo_texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1920, 1080, 0, GL_RGBA,
-               GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                         fbo_texture, 0);
-
-  glGenRenderbuffers(1, &rbo);
-  glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 1920, 1080);
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-                            GL_RENDERBUFFER, rbo);
-
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-    std::cerr << "Framebuffer incomplete!" << std::endl;
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
   auto last_time = std::chrono::high_resolution_clock::now();
-  int display_w = 1920, display_h = 1080;
-
-  GLuint objectSSBO, lightSSBO, gridCellsSSBO, objectIndicesSSBO;
-  glGenBuffers(1, &objectSSBO);
-  glGenBuffers(1, &lightSSBO);
-  glGenBuffers(1, &gridCellsSSBO);
-  glGenBuffers(1, &objectIndicesSSBO);
+  glGenBuffers(1, &m_objectSSBO);
+  glGenBuffers(1, &m_lightSSBO);
+  glGenBuffers(1, &m_gridCellsSSBO);
+  glGenBuffers(1, &m_objectIndicesSSBO);
 
   while (!m_window.shouldClose()) {
 
@@ -205,13 +193,13 @@ void Simulation::run() {
       shaderObjects[i].position = m_objects[i]->position();
       shaderObjects[i].radius = m_objects[i]->radius();
       shaderObjects[i].color = m_objects[i]->color();
-      shaderObjects[i].reflectivity = 0.4f;
+      shaderObjects[i].reflectivity = 0.95f; // Chrome-like reflectivity
     }
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, objectSSBO);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_objectSSBO); // Use member SSBO
     glBufferData(GL_SHADER_STORAGE_BUFFER,
                  shaderObjects.size() * sizeof(GpuPhysicsObject),
                  shaderObjects.data(), GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, objectSSBO);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_objectSSBO);
 
     std::vector<GpuPointLight> shaderLights(m_pointLights.size());
     for (size_t i = 0; i < m_pointLights.size(); ++i) {
@@ -219,11 +207,11 @@ void Simulation::run() {
       shaderLights[i].intensity = m_pointLights[i].intensity;
       shaderLights[i].color = m_pointLights[i].color;
     }
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, lightSSBO);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_lightSSBO); // Use member SSBO
     glBufferData(GL_SHADER_STORAGE_BUFFER,
                  shaderLights.size() * sizeof(GpuPointLight),
                  shaderLights.data(), GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, lightSSBO);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, m_lightSSBO);
 
     int cellsX = static_cast<int>(
         std::ceil(m_constants.WORLD_WIDTH / (m_constants.USE_3D
@@ -286,16 +274,64 @@ void Simulation::run() {
         gpuGridCells[i].objectCount = 0;
       }
     }
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, gridCellsSSBO);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_gridCellsSSBO); // Use member SSBO
     glBufferData(GL_SHADER_STORAGE_BUFFER,
                  gpuGridCells.size() * sizeof(GpuGridCell), gpuGridCells.data(),
                  GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, gridCellsSSBO);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, objectIndicesSSBO);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, m_gridCellsSSBO);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER,
+                 m_objectIndicesSSBO); // Use member SSBO
     glBufferData(GL_SHADER_STORAGE_BUFFER,
                  gpuObjectIndices.size() * sizeof(unsigned int),
                  gpuObjectIndices.data(), GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, objectIndicesSSBO);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, m_objectIndicesSSBO);
+
+    int prev_display_w = m_currentDisplayW;
+    int prev_display_h = m_currentDisplayH;
+
+    m_gui.render(*this, m_fboTexture, m_currentDisplayW,
+                 m_currentDisplayH); // Pass by reference
+
+    if (m_currentDisplayW <= 0 ||
+        m_currentDisplayH <= 0) { // Handle minimized window
+      m_window.swapBuffersAndPollEvents();
+      continue; // Skip rendering if window is minimized
+    }
+
+    if (m_currentDisplayW != prev_display_w ||
+        m_currentDisplayH != prev_display_h) {
+      glDeleteTextures(1, &m_fboTexture);
+      glDeleteRenderbuffers(1, &m_rbo);
+      glDeleteFramebuffers(1, &m_fbo);
+
+      glGenFramebuffers(1, &m_fbo);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+
+      glGenTextures(1, &m_fboTexture);
+      glBindTexture(GL_TEXTURE_2D, m_fboTexture);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_currentDisplayW,
+                   m_currentDisplayH, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                             GL_TEXTURE_2D, m_fboTexture, 0);
+
+      glGenRenderbuffers(1, &m_rbo);
+      glBindRenderbuffer(GL_RENDERBUFFER, m_rbo);
+      glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+                            m_currentDisplayW, m_currentDisplayH);
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                                GL_RENDERBUFFER, m_rbo);
+
+      if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "Framebuffer incomplete after resize!" << std::endl;
+      glBindFramebuffer(GL_FRAMEBUFFER, 0); // Unbind FBO
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    glViewport(0, 0, m_currentDisplayW,
+               m_currentDisplayH); // Set viewport to match FBO texture size
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // Clear the FBO
 
     m_raytracingComputeShader->use();
 
@@ -313,8 +349,9 @@ void Simulation::run() {
     m_raytracingComputeShader->setMat4("viewInverse",
                                        glm::inverse(m_camera.getViewMatrix()));
     m_raytracingComputeShader->setMat4(
-        "projectionInverse", glm::inverse(m_camera.getProjectionMatrix(
-                                 (float)display_w / (float)display_h)));
+        "projectionInverse",
+        glm::inverse(m_camera.getProjectionMatrix((float)m_currentDisplayW /
+                                                  (float)m_currentDisplayH)));
     m_raytracingComputeShader->setInt("numObjects", m_objects.size());
     m_raytracingComputeShader->setInt("numLights", m_pointLights.size());
     m_raytracingComputeShader->setVec3("worldBoundsMin", worldBoundsMin);
@@ -328,18 +365,23 @@ void Simulation::run() {
     m_raytracingComputeShader->setInt("gridCellsY", cellsY);
     m_raytracingComputeShader->setInt("gridCellsZ", cellsZ);
     m_raytracingComputeShader->setFloat("cellSize", cellSize);
+    m_raytracingComputeShader->setInt("frameRandSeed", glfwGetTime() * 1000.0);
+    m_raytracingComputeShader->setFloat("floorGlossiness", 0.7f);
 
-    glBindImageTexture(0, fbo_texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-    glDispatchCompute((GLuint)std::ceil((float)display_w / 8.0f),
-                      (GLuint)std::ceil((float)display_h / 8.0f), 1);
+    glBindImageTexture(0, m_fboTexture, 0, GL_FALSE, 0, GL_WRITE_ONLY,
+                       GL_RGBA8);
+    glDispatchCompute((GLuint)std::ceil((float)m_currentDisplayW / 8.0f),
+                      (GLuint)std::ceil((float)m_currentDisplayH / 8.0f), 1);
 
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER,
+                      0); // Unbind FBO, render to default framebuffer
+    // Clear the default framebuffer for ImGui to draw on top of (optional,
+    // depends on overlay needs)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    m_gui.render(*this, fbo_texture, display_w, display_h);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     ImGuiIO &io = ImGui::GetIO();
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
@@ -351,15 +393,6 @@ void Simulation::run() {
 
     m_window.swapBuffersAndPollEvents();
   }
-
-  glDeleteBuffers(1, &objectSSBO);
-  glDeleteBuffers(1, &lightSSBO);
-  glDeleteBuffers(1, &gridCellsSSBO);
-  glDeleteBuffers(1, &objectIndicesSSBO);
-
-  glDeleteFramebuffers(1, &fbo);
-  glDeleteTextures(1, &fbo_texture);
-  glDeleteRenderbuffers(1, &rbo);
 }
 
 void Simulation::checkCollisionsForChunk(

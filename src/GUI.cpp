@@ -30,8 +30,8 @@ void GUI::shutdown() {
   ImGui::DestroyContext();
 }
 
-void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
-                 int display_h) {
+void GUI::render(Simulation &sim, GLuint sceneTexture, int &display_w, 
+                 int &display_h) { 
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
@@ -165,6 +165,8 @@ void GUI::render(Simulation &sim, GLuint sceneTexture, int display_w,
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
   ImGui::Begin("Scene");
   ImVec2 scene_view_size = ImGui::GetContentRegionAvail();
+  display_w = static_cast<int>(scene_view_size.x); // Update display_w
+  display_h = static_cast<int>(scene_view_size.y); // Update display_h
   ImGui::Image((ImTextureID)(uintptr_t)sceneTexture, scene_view_size,
                ImVec2(0, 1), ImVec2(1, 0));
   ImGui::End();

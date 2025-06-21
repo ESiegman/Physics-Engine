@@ -120,11 +120,11 @@ bool intersectFloor(Ray ray, out HitInfo hit) {
     float checkerSize = 200.0;
     vec2 floorCoords = hit.position.xz / checkerSize;
     if (int(floor(floorCoords.x) + floor(floorCoords.y)) % 2 == 0) {
-        hit.color = vec3(0.1, 0.1, 0.1);
+        hit.color = vec3(0.35, 0.2, 0.05);
     } else {
-        hit.color = vec3(0.8, 0.8, 0.8);
+        hit.color = vec3(0.7, 0.5, 0.25);
     }
-    hit.reflectivity = 0.05;
+    hit.reflectivity = 0.15; 
 
     return true;
 }
@@ -225,6 +225,11 @@ vec3 calculateDirectLight(HitInfo hit, vec3 lightPos, vec3 lightColor, float lig
     float diff = max(dot(hit.normal, lightDir), 0.0);
     vec3 diffuse = diff * lightColor * hit.color;
 
+    vec3 viewDir = normalize(cameraPos - hit.position);
+    vec3 reflectDir = reflect(-lightDir, hit.normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 256.0);
+    vec3 specular = lightColor * spec;
+
     Ray shadowRay;
     shadowRay.origin = hit.position + hit.normal * EPSILON * 4.0;
     shadowRay.direction = lightDir;
@@ -247,7 +252,7 @@ vec3 calculateDirectLight(HitInfo hit, vec3 lightPos, vec3 lightColor, float lig
     } else {
         float lightDistance = length(lightPos - hit.position);
         float attenuation = 1.0 / (1.0 + 0.001 * lightDistance + 0.00001 * lightDistance * lightDistance);
-        return diffuse * lightIntensity * attenuation;
+        return (diffuse + specular) * lightIntensity * attenuation;
     }
 }
 
@@ -305,8 +310,9 @@ void main() {
 
     for (int bounce = 0; bounce < MAX_BOUNCES; ++bounce) {
         if (trace(ray, hit)) {
-            vec3 ambientIntensity = vec3(0.2); 
-            vec3 ambientColor = hit.color * ambientIntensity;
+            // Enhanced ambient light: now a combined global and object-specific tint
+            vec3 globalAmbientColor = vec3(0.15, 0.15, 0.15); // A slightly stronger, neutral ambient light
+            vec3 ambientColor = hit.color * globalAmbientColor;
 
 
             vec3 directLightColor = vec3(0.0);

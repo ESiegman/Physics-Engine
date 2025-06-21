@@ -54,4 +54,13 @@ private:
       const std::vector<std::unique_ptr<PhysicsObject>> &objects,
       SpatialGrid &grid, size_t start_idx, size_t end_idx,
       const SimulationConstants &constants);
+  GLuint m_fbo;
+  GLuint m_fboTexture;
+  GLuint m_rbo;
+  int m_currentDisplayW;
+  int m_currentDisplayH;
+  GLuint m_objectSSBO;
+  GLuint m_lightSSBO;
+  GLuint m_gridCellsSSBO;
+  GLuint m_objectIndicesSSBO;
 };

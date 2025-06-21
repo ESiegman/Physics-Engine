@@ -11,8 +11,8 @@ class Simulation;
 class GUI {
 public:
   void init(GLFWwindow *window);
-  void render(Simulation &sim, GLuint sceneTexture, int display_w,
-              int display_h);
+  void render(Simulation &sim, GLuint sceneTexture, int &display_w,
+              int &display_h);
   void shutdown();
 
 private:
