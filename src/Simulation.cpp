@@ -1,9 +1,9 @@
 #include "../include/Simulation.hpp"
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
-#include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <map>
 #include <thread>
 
 struct ShaderPhysicsObjectData {
@@ -18,6 +18,20 @@ struct ShaderPointLightData {
   float intensity;
   glm::vec3 color;
   float padding2;
+};
+
+struct GpuPhysicsObject {
+  glm::vec3 position;
+  float radius;
+  glm::vec3 color;
+  float reflectivity;
+};
+
+struct GpuPointLight {
+  glm::vec3 position;
+  float intensity;
+  glm::vec3 color;
+  float padding;
 };
 
 Simulation::Simulation()
@@ -35,11 +49,12 @@ Simulation::Simulation()
       new Shader("shaders/raytracer.comp", ShaderType::COMPUTE_SHADER);
 
   m_pointLights.push_back({glm::vec3(m_constants.WORLD_WIDTH / 2.0f,
-                                     m_constants.WORLD_HEIGHT / 2.0f,
-                                     m_constants.WORLD_DEPTH / 2.0f),
-                           glm::vec3(1.0f, 1.0f, 1.0f), 1.0f});
-  m_pointLights.push_back({glm::vec3(0.0f, m_constants.WORLD_HEIGHT, 0.0f),
-                           glm::vec3(0.8f, 0.5f, 0.3f), 0.7f});
+                                      m_constants.WORLD_HEIGHT / 2.0f,
+                                      m_constants.WORLD_DEPTH / 2.0f),
+                            glm::vec3(1.0f, 1.0f, 1.0f), 1.0f});
+  //m_pointLights.push_back(
+  //    {glm::vec3(0.0f, m_constants.WORLD_HEIGHT + 5000.0f, 0.0f),
+  //     glm::vec3(1.0f, 1.0f, 1.0f), 1.0f});
 
   restart();
 }
@@ -59,7 +74,11 @@ void Simulation::restart() {
 }
 
 void Simulation::notifyWorldDimensionsChanged() {
-  m_worldDimensionsChanged = true;
+  m_grid = SpatialGrid(m_constants.WORLD_WIDTH, m_constants.WORLD_HEIGHT,
+                       m_constants.WORLD_DEPTH,
+                       m_constants.USE_3D ? m_constants.CELL_SIZE_3D
+                                          : m_constants.CELL_SIZE_2D);
+  restart();
 }
 
 void Simulation::run() {
@@ -136,36 +155,34 @@ void Simulation::run() {
       m_worldDimensionsChanged = false;
     }
 
-    std::vector<ShaderPhysicsObjectData> shaderObjects(m_objects.size());
+    std::vector<GpuPhysicsObject> shaderObjects(m_objects.size());
     for (size_t i = 0; i < m_objects.size(); ++i) {
       shaderObjects[i].position = m_objects[i]->position();
       shaderObjects[i].radius = m_objects[i]->radius();
       shaderObjects[i].color = m_objects[i]->color();
+      shaderObjects[i].reflectivity = 0.1f;
     }
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, objectSSBO);
     glBufferData(GL_SHADER_STORAGE_BUFFER,
-                 shaderObjects.size() * sizeof(ShaderPhysicsObjectData),
+                 shaderObjects.size() * sizeof(GpuPhysicsObject),
                  shaderObjects.data(), GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, objectSSBO);
 
-    std::vector<ShaderPointLightData> shaderLights(m_pointLights.size());
+    std::vector<GpuPointLight> shaderLights(m_pointLights.size());
     for (size_t i = 0; i < m_pointLights.size(); ++i) {
       shaderLights[i].position = m_pointLights[i].position;
       shaderLights[i].intensity = m_pointLights[i].intensity;
       shaderLights[i].color = m_pointLights[i].color;
+      shaderLights[i].padding = 0.0f;
     }
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, lightSSBO);
     glBufferData(GL_SHADER_STORAGE_BUFFER,
-                 shaderLights.size() * sizeof(ShaderPointLightData),
+                 shaderLights.size() * sizeof(GpuPointLight),
                  shaderLights.data(), GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, lightSSBO);
 
-    std::vector<GpuGridCell> gpuGridCells;
-    std::vector<unsigned int> gpuObjectIndices;
-
-    unsigned int currentObjectIndexOffset = 0;
     int cellsX = static_cast<int>(
         std::ceil(m_constants.WORLD_WIDTH / (m_constants.USE_3D
                                                  ? m_constants.CELL_SIZE_3D
@@ -186,33 +203,54 @@ void Simulation::run() {
     if (cellsZ == 0)
       cellsZ = 1;
 
-    gpuGridCells.resize(cellsX * cellsY * cellsZ);
+    std::map<int, std::vector<unsigned int>> cellObjectsMap;
+    float cellSize = m_constants.USE_3D ? m_constants.CELL_SIZE_3D
+                                        : m_constants.CELL_SIZE_2D;
 
-    for (int z = 0; z < cellsZ; ++z) {
-      for (int y = 0; y < cellsY; ++y) {
-        for (int x = 0; x < cellsX; ++x) {
-          glm::ivec3 coords = glm::ivec3(x, y, z);
-          int index = x + y * cellsX + z * cellsX * cellsY;
-          const std::vector<PhysicsObject *> &cellObjects =
-              m_grid.getInternalCellObjects(coords);
+    for (size_t i = 0; i < m_objects.size(); ++i) {
+      const auto &obj = m_objects[i];
 
-          gpuGridCells[index].objectStartIndex = currentObjectIndexOffset;
-          gpuGridCells[index].objectCount = cellObjects.size();
+      glm::vec3 min_bound = obj->position() - glm::vec3(obj->radius());
+      glm::vec3 max_bound = obj->position() + glm::vec3(obj->radius());
 
-          for (PhysicsObject *obj : cellObjects) {
-            ptrdiff_t objIdx = -1;
-            for (size_t i = 0; i < m_objects.size(); ++i) {
-              if (m_objects[i].get() == obj) {
-                objIdx = i;
-                break;
-              }
-            }
-            if (objIdx != -1) {
-              gpuObjectIndices.push_back(static_cast<unsigned int>(objIdx));
+      glm::ivec3 min_cell = glm::ivec3(floor(min_bound.x / cellSize),
+                                       floor(min_bound.y / cellSize),
+                                       floor(min_bound.z / cellSize));
+      glm::ivec3 max_cell = glm::ivec3(floor(max_bound.x / cellSize),
+                                       floor(max_bound.y / cellSize),
+                                       floor(max_bound.z / cellSize));
+
+      for (int x = min_cell.x; x <= max_cell.x; ++x) {
+        for (int y = min_cell.y; y <= max_cell.y; ++y) {
+          for (int z = (m_constants.USE_3D ? min_cell.z : 0);
+               z <= (m_constants.USE_3D ? max_cell.z : 0); ++z) {
+            glm::ivec3 cellCoords(x, y, z);
+
+            if (cellCoords.x >= 0 && cellCoords.x < cellsX &&
+                cellCoords.y >= 0 && cellCoords.y < cellsY &&
+                cellCoords.z >= 0 && cellCoords.z < cellsZ) {
+              int cellIndex = cellCoords.x + cellCoords.y * cellsX +
+                              cellCoords.z * cellsX * cellsY;
+              cellObjectsMap[cellIndex].push_back(i);
             }
           }
-          currentObjectIndexOffset += cellObjects.size();
         }
+      }
+    }
+
+    std::vector<GpuGridCell> gpuGridCells(cellsX * cellsY * cellsZ);
+    std::vector<unsigned int> gpuObjectIndices;
+
+    for (size_t i = 0; i < gpuGridCells.size(); ++i) {
+      gpuGridCells[i].objectStartIndex = gpuObjectIndices.size();
+
+      if (cellObjectsMap.count(i)) {
+        const auto &objectsInCell = cellObjectsMap.at(i);
+        gpuGridCells[i].objectCount = objectsInCell.size();
+        gpuObjectIndices.insert(gpuObjectIndices.end(), objectsInCell.begin(),
+                                objectsInCell.end());
+      } else {
+        gpuGridCells[i].objectCount = 0;
       }
     }
 

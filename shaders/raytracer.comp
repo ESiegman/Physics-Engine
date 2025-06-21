@@ -1,15 +1,14 @@
 #version 430 core
 
 layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-layout (rgba8, binding = 0) uniform image2D outputImage;
+layout (rgba8, binding = 0) uniform writeonly image2D outputImage;
 
-const int MAX_RECURSION_DEPTH = 4;
-const float SHADOW_BIAS = 0.005;
 const vec3 BACKGROUND_COLOR = vec3(0.05, 0.08, 0.15);
 const vec3 FLOOR_COLOR_A = vec3(0.8);
 const vec3 FLOOR_COLOR_B = vec3(0.5);
-const vec3 BOX_COLOR = vec3(0.1, 0.12, 0.18);
 const float GLOBAL_AMBIENT = 0.25;
+const float SHADOW_BIAS = 0.05;
+const int MAX_RECURSION_DEPTH = 4;
 
 struct ShaderPhysicsObject {
     vec3 position;
@@ -45,11 +44,9 @@ layout (std140, binding = 4) readonly buffer GpuObjectIndicesBuffer {
 
 uniform int numObjects;
 uniform int numLights;
-
 uniform vec3 cameraPos;
 uniform mat4 viewInverse;
 uniform mat4 projectionInverse;
-
 uniform int gridCellsX;
 uniform int gridCellsY;
 uniform int gridCellsZ;
@@ -66,10 +63,10 @@ struct TraceResult {
     float distance;
     vec3 hitPoint;
     vec3 normal;
-    int hitType; // 0: None, 1: Sphere, 2: Floor, 3: Box
+    int objectIndex;
+    int hitType; 
     vec3 color;
     float reflectivity;
-    int objectIndex;
 };
 
 float intersectSphere(Ray r, vec3 spherePos, float sphereRadius) {
@@ -78,14 +75,13 @@ float intersectSphere(Ray r, vec3 spherePos, float sphereRadius) {
     float b = 2.0 * dot(oc, r.direction);
     float c = dot(oc, oc) - sphereRadius * sphereRadius;
     float discriminant = b * b - 4.0 * a * c;
-
     if (discriminant < 0.0) {
         return 1e30;
     } else {
-        float t0 = (-b - sqrt(discriminant)) / (2.0 * a);
-        if (t0 > 0.001) return t0;
-        float t1 = (-b + sqrt(discriminant)) / (2.0 * a);
-        if (t1 > 0.001) return t1;
+        float t = (-b - sqrt(discriminant)) / (2.0 * a);
+        if (t > 0.001) return t;
+        t = (-b + sqrt(discriminant)) / (2.0 * a);
+        if (t > 0.001) return t;
         return 1e30;
     }
 }
@@ -117,60 +113,65 @@ TraceResult findClosestHit(Ray r) {
     result.distance = 1e30;
     result.hitType = 0;
 
-    vec3 gridMinWorld = vec3(0.0);
-    vec3 gridMaxWorld = worldDimensions;
-    
     vec3 invDir = 1.0 / r.direction;
-    vec3 t0s = (gridMinWorld - r.origin) * invDir;
-    vec3 t1s = (gridMaxWorld - r.origin) * invDir;
-    vec3 tmin = min(t0s, t1s);
-    vec3 tmax = max(t0s, t1s);
-    float t_enter_grid = max(max(tmin.x, tmin.y), tmin.z);
-    float t_exit_grid = min(min(tmax.x, tmax.y), tmax.z);
+    vec3 tNearPlanes = (vec3(0.0) - r.origin) * invDir;
+    vec3 tFarPlanes = (worldDimensions - r.origin) * invDir;
+    vec3 tMin = min(tNearPlanes, tFarPlanes);
+    vec3 tMax = max(tNearPlanes, tFarPlanes);
 
-    if (t_enter_grid < t_exit_grid && t_exit_grid > 0.0) {
-        vec3 traversalRayOrigin = r.origin + r.direction * max(0.0, t_enter_grid);
-        ivec3 currentCellCoords = ivec3(floor(traversalRayOrigin / cellSize));
-        vec3 stepDir = sign(r.direction);
-        vec3 tDelta = abs(vec3(cellSize) / r.direction);
+    float tEnter = max(max(tMin.x, tMin.y), tMin.z);
+    float tExit = min(min(tMax.x, tMax.y), tMax.z);
 
-        vec3 nextBoundary;
-        nextBoundary.x = (r.direction.x > 0) ? (float(currentCellCoords.x + 1) * cellSize) : (float(currentCellCoords.x) * cellSize);
-        nextBoundary.y = (r.direction.y > 0) ? (float(currentCellCoords.y + 1) * cellSize) : (float(currentCellCoords.y) * cellSize);
-        nextBoundary.z = (r.direction.z > 0) ? (float(currentCellCoords.z + 1) * cellSize) : (float(currentCellCoords.z) * cellSize);
+    if (tEnter < tExit && tExit >= 0.0) {
+        vec3 entryPoint = r.origin + r.direction * max(0.0, tEnter);
+        ivec3 currentCell = ivec3(floor(entryPoint / cellSize));
+        currentCell = clamp(currentCell, ivec3(0), ivec3(gridCellsX - 1, gridCellsY - 1, gridCellsZ - 1));
 
-        vec3 tMax;
-        tMax.x = (r.direction.x != 0) ? (nextBoundary.x - traversalRayOrigin.x) / r.direction.x : 1e30;
-        tMax.y = (r.direction.y != 0) ? (nextBoundary.y - traversalRayOrigin.y) / r.direction.y : 1e30;
-        tMax.z = (r.direction.z != 0) ? (nextBoundary.z - traversalRayOrigin.z) / r.direction.z : 1e30;
+        vec3 step = sign(r.direction);
+        vec3 tDelta = abs(vec3(cellSize) * invDir);
         
-        for (int step = 0; step < 500; ++step) {
-            if (!isValidCell(currentCellCoords)) break;
+        vec3 cellBoundary = vec3(currentCell) * cellSize;
+        vec3 tMaxTotal;
+
+        for(int i = 0; i < 3; ++i) {
+            if (abs(r.direction[i]) < 1e-6) {
+                tMaxTotal[i] = 1e30;
+            } else if (step[i] > 0) {
+                tMaxTotal[i] = (cellBoundary[i] + cellSize - r.origin[i]) * invDir[i];
+            } else {
+                tMaxTotal[i] = (cellBoundary[i] - r.origin[i]) * invDir[i];
+            }
+        }
+        
+        for (int i = 0; i < 300; ++i) {
+            if (!isValidCell(currentCell)) break;
             
-            int cellIdx = get1DIndex(currentCellCoords);
-            if (cellIdx >= 0 && cellIdx < (gridCellsX * gridCellsY * gridCellsZ)) {
-                GpuGridCell cell = gpuGridCells[cellIdx];
-                for (uint i = 0; i < cell.objectCount; ++i) {
-                    uint objIdx = gpuObjectIndices[cell.objectStartIndex + i];
-                    float dist = intersectSphere(r, objects[objIdx].position, objects[objIdx].radius);
-                    if (dist < result.distance) {
-                        result.hit = true;
-                        result.distance = dist;
-                        result.objectIndex = int(objIdx);
-                        result.hitType = 1;
-                    }
+            int cellIdx = get1DIndex(currentCell);
+            GpuGridCell cell = gpuGridCells[cellIdx];
+
+            for (uint j = 0; j < cell.objectCount; ++j) {
+                uint objIdx = gpuObjectIndices[cell.objectStartIndex + j];
+                float dist = intersectSphere(r, objects[objIdx].position, objects[objIdx].radius);
+                if (dist < result.distance) {
+                    result.hit = true;
+                    result.distance = dist;
+                    result.objectIndex = int(objIdx);
+                    result.hitType = 1;
                 }
             }
-            
-            float nextT = min(min(tMax.x, tMax.y), tMax.z);
-            if (result.distance < max(0.0, t_enter_grid) + nextT) break;
 
-            if (tMax.x < tMax.y) {
-                if (tMax.x < tMax.z) { currentCellCoords.x += int(stepDir.x); tMax.x += tDelta.x; } 
-                else { currentCellCoords.z += int(stepDir.z); tMax.z += tDelta.z; }
+            float tNextCross = min(min(tMaxTotal.x, tMaxTotal.y), tMaxTotal.z);
+            if (result.distance < tNextCross || tNextCross > tExit) break;
+            
+            if (tNextCross == tMaxTotal.x) {
+                currentCell.x += int(step.x);
+                tMaxTotal.x += tDelta.x;
+            } else if (tNextCross == tMaxTotal.y) {
+                currentCell.y += int(step.y);
+                tMaxTotal.y += tDelta.y;
             } else {
-                if (tMax.y < tMax.z) { currentCellCoords.y += int(stepDir.y); tMax.y += tDelta.y; }
-                else { currentCellCoords.z += int(stepDir.z); tMax.z += tDelta.z; }
+                currentCell.z += int(step.z);
+                tMaxTotal.z += tDelta.z;
             }
         }
     }
@@ -181,32 +182,18 @@ TraceResult findClosestHit(Ray r) {
         result.distance = floorDist;
         result.hitType = 2;
     }
-    
-    if (t_enter_grid > 0.0 && t_enter_grid < result.distance) {
-        result.hit = true;
-        result.distance = t_enter_grid;
-        result.hitType = 3;
-    }
 
     if (result.hit) {
         result.hitPoint = r.origin + r.direction * result.distance;
-        if (result.hitType == 1) { // Sphere
+        if (result.hitType == 1) {
             result.normal = normalize(result.hitPoint - objects[result.objectIndex].position);
             result.color = objects[result.objectIndex].color;
             result.reflectivity = objects[result.objectIndex].reflectivity;
-        } else if (result.hitType == 2) { // Floor
+        } else if (result.hitType == 2) {
             result.normal = vec3(0, 1, 0);
-            vec2 c = floor(result.hitPoint.xz / (cellSize*2.0));
-            result.color = mod(c.x + c.y, 2.0) == 0 ? FLOOR_COLOR_A : FLOOR_COLOR_B;
             result.reflectivity = 0.2;
-        } else if (result.hitType == 3) { // Box
-            vec3 c = (result.hitPoint - (gridMaxWorld + gridMinWorld) / 2.0);
-            vec3 d = (gridMaxWorld - gridMinWorld) / 2.0;
-            vec3 p = c / d;
-            vec3 a = abs(p);
-            result.normal = -sign(r.direction) * step(a.yzx, a.xyz) * step(a.zxy, a.xyz);
-            result.color = BOX_COLOR;
-            result.reflectivity = 0.0;
+            vec2 c = floor(result.hitPoint.xz / (cellSize * 2.0));
+            result.color = (mod(c.x + c.y, 2.0) == 0) ? FLOOR_COLOR_A : FLOOR_COLOR_B;
         }
     }
     return result;
@@ -222,7 +209,9 @@ vec3 shade(TraceResult res, Ray r) {
         float lightDist = length(lightDir);
         lightDir = normalize(lightDir);
 
-        Ray shadowRay = { res.hitPoint + res.normal * SHADOW_BIAS, lightDir };
+        Ray shadowRay;
+        shadowRay.origin = res.hitPoint + res.normal * SHADOW_BIAS;
+        shadowRay.direction = lightDir;
         TraceResult shadowRes = findClosestHit(shadowRay);
         
         if (shadowRes.hit && shadowRes.distance < lightDist) {
@@ -262,7 +251,7 @@ vec3 trace(Ray r) {
 
         r.origin = res.hitPoint + res.normal * SHADOW_BIAS;
         r.direction = reflect(r.direction, res.normal);
-        rayColorAttenuation *= res.reflectivity;
+        rayColorAttenuation *= res.reflectivity * res.color;
     }
     return finalColor;
 }
@@ -279,12 +268,13 @@ void main() {
     vec2 screenPos = uv * 2.0 - 1.0;
 
     vec4 clipPos = vec4(screenPos, 1.0, 1.0);
-    vec4 eyePos = projectionInverse * clipPos;
-    eyePos /= eyePos.w;
+    vec4 viewPos = projectionInverse * clipPos;
+    viewPos /= viewPos.w;
+    vec4 worldPos = viewInverse * viewPos;
 
     Ray r;
     r.origin = cameraPos;
-    r.direction = normalize(vec3(viewInverse * eyePos));
+    r.direction = normalize(vec3(worldPos) - cameraPos);
     
     vec3 finalColor = trace(r);
 
